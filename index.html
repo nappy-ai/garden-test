@@ -1,0 +1,722 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+<meta name="theme-color" content="#F4F1E8">
+<title>표정의 정원 · 데이지 테스트</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,500;1,500&display=swap" rel="stylesheet">
+<style>
+:root{
+  --cream:#F4F1E8; --green:#40543A; --sage:#A2B488; --pink:#D6A1B4; --lav:#B1A3CB; --yellow:#D9BF83;
+  --ink:#2f3a2b; --line:rgba(64,84,58,.22);
+  --sat:env(safe-area-inset-top,0px); --sab:env(safe-area-inset-bottom,0px);
+}
+*{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
+html,body{height:100%;background:var(--cream);color:var(--ink);overflow:hidden;
+  font:15px/1.5 -apple-system,BlinkMacSystemFont,"Apple SD Gothic Neo","Pretendard","Noto Sans KR",sans-serif;
+  -webkit-user-select:none;user-select:none;overscroll-behavior:none}
+#stage{position:fixed;inset:0;display:block;width:100%;height:100%;touch-action:none}
+
+.top{position:fixed;left:0;right:0;top:0;padding:calc(var(--sat) + 14px) 18px 0;display:flex;align-items:flex-start;justify-content:space-between;pointer-events:none}
+.brand{font-family:"Cormorant Garamond",serif;font-style:italic;font-size:21px;line-height:1.1;color:var(--green);letter-spacing:.01em}
+.brand small{display:block;font-style:normal;font-size:11px;color:rgba(64,84,58,.6);letter-spacing:.12em;margin-top:2px}
+.chip{white-space:nowrap;flex:none;pointer-events:auto;border:1px solid var(--line);background:rgba(244,241,232,.8);color:var(--green);font-size:12px;padding:6px 10px;border-radius:999px}
+
+.bottom{position:fixed;left:0;right:0;bottom:0;padding:0 14px calc(var(--sab) + 14px);display:grid;grid-template-columns:auto 1fr auto;gap:12px;align-items:end}
+.cam{width:78px;height:104px;border-radius:14px;overflow:hidden;background:#e7e2d3;border:1px solid var(--line);position:relative}
+.cam video{width:100%;height:100%;object-fit:cover;transform:scaleX(-1);display:block}
+.cam .dot{position:absolute;left:6px;top:6px;width:8px;height:8px;border-radius:50%;background:#c9c2ad}
+.cam .dot.on{background:#7fa35f;box-shadow:0 0 0 3px rgba(127,163,95,.25)}
+.guide{align-self:center;font-size:13.5px;line-height:1.45;color:var(--green);background:rgba(244,241,232,.86);border:1px solid var(--line);border-radius:14px;padding:9px 12px;min-height:44px;display:flex;align-items:center}
+.rec{height:56px;padding:0 20px;border-radius:999px;border:0;background:var(--green);color:var(--cream);font-size:15px;font-weight:600;letter-spacing:.02em}
+.rec:disabled{opacity:.4}
+
+.overlay{position:fixed;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:14px;padding:32px 28px calc(var(--sab) + 32px);text-align:center;background:rgba(244,241,232,.9);backdrop-filter:blur(6px);-webkit-backdrop-filter:blur(6px)}
+.overlay[hidden]{display:none}
+.overlay h1{font-family:"Cormorant Garamond",serif;font-weight:500;font-style:italic;font-size:40px;line-height:1.05;color:var(--green)}
+.overlay h2{font-size:19px;font-weight:600;color:var(--green)}
+.overlay p{font-size:14.5px;color:#55604f;max-width:300px}
+.overlay .note{font-size:12.5px;color:#7a8273}
+.btn{height:52px;min-width:220px;padding:0 24px;border-radius:999px;border:0;background:var(--green);color:var(--cream);font-size:16px;font-weight:600}
+.btn.ghost{background:transparent;color:var(--green);border:1px solid var(--green)}
+.spinner{width:28px;height:28px;border-radius:50%;border:3px solid rgba(64,84,58,.15);border-top-color:var(--green);animation:spin 1s linear infinite}
+@keyframes spin{to{transform:rotate(360deg)}}
+
+.debug{position:fixed;right:12px;top:calc(var(--sat) + 52px);width:176px;background:rgba(244,241,232,.92);border:1px solid var(--line);border-radius:12px;padding:10px 12px;font-size:11.5px;color:var(--green)}
+.debug[hidden]{display:none}
+.debug .row{display:grid;grid-template-columns:52px 1fr 34px;gap:6px;align-items:center;margin:3px 0}
+.debug .bar{height:6px;background:rgba(64,84,58,.12);border-radius:3px;overflow:hidden}
+.debug .bar i{display:block;height:100%;width:0;background:var(--sage)}
+.debug .bar i.on{background:var(--green)}
+.debug .meta{margin-top:6px;border-top:1px solid var(--line);padding-top:6px;line-height:1.6}
+</style>
+</head>
+<body>
+<canvas id="stage"></canvas>
+
+<div class="top">
+  <div class="brand">Garden of Expressions<small>DAISY · TEST</small></div>
+  <button class="chip" id="dbgBtn" type="button">인식값</button>
+</div>
+
+<div class="debug" id="debug" hidden>
+  <div class="row"><span>미소</span><span class="bar"><i id="bSmile"></i></span><span id="vSmile">0</span></div>
+  <div class="row"><span>입 벌림</span><span class="bar"><i id="bJaw"></i></span><span id="vJaw">0</span></div>
+  <div class="row"><span>눈 감음</span><span class="bar"><i id="bBlink"></i></span><span id="vBlink">0</span></div>
+  <div class="row"><span>기울기</span><span class="bar"><i id="bRoll"></i></span><span id="vRoll">0°</span></div>
+  <div class="meta" id="meta"></div>
+</div>
+
+<div class="bottom">
+  <div class="cam"><video id="video" playsinline muted autoplay></video><span class="dot" id="camDot"></span></div>
+  <div class="guide" id="guide">카메라를 켜면 시작해요.</div>
+  <button class="rec" id="recBtn" type="button" disabled>기록하기</button>
+</div>
+
+<div class="overlay" id="startOv">
+  <h1>Garden of<br>Expressions</h1>
+  <p>웃으면 줄기가 자라고, 입을 벌리면 꽃이 피어요.<br>고개를 기울이거나 눈을 깜빡여 보세요.</p>
+  <button class="btn" id="startBtn" type="button">카메라 켜고 시작하기</button>
+  <p class="note">얼굴 영상은 이 기기 안에서만 처리돼요.<br>어디에도 저장하거나 보내지 않아요.</p>
+  <p class="note" id="inappNote" hidden>카카오톡·인스타그램 안에서 열었다면 카메라가 안 될 수 있어요.<br>오른쪽 위 메뉴에서 ‘다른 브라우저로 열기’를 눌러 주세요.</p>
+</div>
+
+<div class="overlay" id="loadOv" hidden>
+  <div class="spinner"></div>
+  <p id="loadMsg">얼굴 인식 준비 중…</p>
+</div>
+
+<div class="overlay" id="errOv" hidden>
+  <h2 id="errTitle">카메라를 켤 수 없어요</h2>
+  <p id="errMsg"></p>
+  <button class="btn" id="retryBtn" type="button">다시 시도</button>
+</div>
+
+<div class="overlay" id="doneOv" hidden>
+  <h2>기록이 완료되었어요!</h2>
+  <p>테스트 버전이라 아직 정원에 저장되지는 않아요.<br>카메라는 꺼졌고, 식물은 이 모습으로 멈췄어요.</p>
+  <button class="btn ghost" id="viewBtn" type="button">식물 다시 보기</button>
+  <button class="btn" id="againBtn" type="button">새로 심기</button>
+</div>
+
+<script type="importmap">
+{ "imports": {
+  "three": "https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js",
+  "@mediapipe/tasks-vision": "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/vision_bundle.mjs"
+} }
+</script>
+<script type="module">
+import * as THREE from 'three';
+
+/* ============================================================
+   조정용 상수 — 실기기 테스트 후 여기 숫자만 바꾸면 돼요
+   ============================================================ */
+const CFG = {
+  // 인식 임계값 (켜짐 / 꺼짐 — 히스테리시스)
+  SMILE_ON: 0.45, SMILE_OFF: 0.30,
+  JAW_ON: 0.30,   JAW_OFF: 0.18,
+  BLINK_CLOSED: 0.55, BLINK_OPEN: 0.30,
+  BLINK_MIN_MS: 40, BLINK_MAX_MS: 1000,   // 이보다 길게 감으면(웃을 때 눈 찡그림 등) 깜빡임으로 안 셈
+  ROLL_DEADZONE_DEG: 4, ROLL_MAX_DEG: 35,
+  // 평활화 시간상수 (초)
+  TAU_FACE: 0.08, TAU_ROLL: 0.15,
+  // 성장
+  GROW_SPEED: 0.9,      // 미소 최대일 때 초당 줄기 길이 (월드 단위)
+  BUD_LENGTH: 1.6,      // 이 길이가 되면 꽃봉오리 생김
+  BLOOM_SPEED: 0.35,    // 입 최대로 벌렸을 때 초당 개화량 (0→1)
+  TILT_GAIN: 1.5,       // 고개 각도 → 줄기 휨 배율
+  STEP: 0.05,           // 경로 점 간격
+  MAX_POINTS: 3000,     // 넘으면 경로 단순화(점 간격 2배로 재샘플)
+  // 투명 상자 안에서의 움직임
+  WALL_SENSE: 0.7, WALL_PUSH: 9, WALL_SLIDE: 5, WALL_PAD: 0.22,
+  UP_BIAS: 1.2, WANDER: 1.6, MAX_TURN: 3.2,
+  BOX_H: 6, BOX_D: 2.4,
+};
+
+const params = new URLSearchParams(location.search);
+const SIM = params.has('sim');  // 테스트 전용: 키보드로 표정 흉내 (S 미소, O 입, B 깜빡, ←→ 기울기)
+
+/* ---------- 렌더러 / 장면 ---------- */
+const canvas = document.getElementById('stage');
+const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, preserveDrawingBuffer: true });
+renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+renderer.outputColorSpace = THREE.SRGBColorSpace;
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure = 1.05;
+
+const scene = new THREE.Scene();
+const CREAM = new THREE.Color('#F4F1E8');
+scene.background = CREAM;
+scene.fog = new THREE.Fog(CREAM, 14, 30);
+
+const cam = new THREE.PerspectiveCamera(32, 1, 0.1, 100);
+
+scene.add(new THREE.HemisphereLight('#fffaf0', '#c9c3a8', 1.25));
+const sun = new THREE.DirectionalLight('#fff4df', 2.1);
+sun.position.set(-3.5, 9, 6);
+sun.castShadow = true;
+sun.shadow.mapSize.set(1024, 1024);
+sun.shadow.bias = -0.0008;
+sun.shadow.radius = 4;
+scene.add(sun, sun.target);
+const fill = new THREE.DirectionalLight('#e8ecff', 0.5);
+fill.position.set(4, 3, -2);
+scene.add(fill);
+
+// 상자 크기는 화면 비율에 맞춰 시작 시 한 번 정해요
+const size0 = { w: innerWidth, h: innerHeight };
+const usableH = size0.h * 0.80;
+const BOX = { H: CFG.BOX_H, D: CFG.BOX_D, W: THREE.MathUtils.clamp(CFG.BOX_H * (size0.w / usableH) * 0.92, 2.8, 7.5) };
+const LIM = { x: BOX.W / 2 - CFG.WALL_PAD, yMin: 0.12, yMax: BOX.H - CFG.WALL_PAD, z: BOX.D / 2 - CFG.WALL_PAD };
+
+// 바닥
+const floor = new THREE.Mesh(new THREE.CircleGeometry(22, 48), new THREE.MeshStandardMaterial({ color: '#efe9da', roughness: 1 }));
+floor.rotation.x = -Math.PI / 2; floor.receiveShadow = true; scene.add(floor);
+
+// 투명 상자
+const boxGeo = new THREE.BoxGeometry(BOX.W, BOX.H, BOX.D);
+boxGeo.translate(0, BOX.H / 2, 0);
+const glass = new THREE.Mesh(boxGeo, new THREE.MeshBasicMaterial({ color: '#ffffff', transparent: true, opacity: 0.10, side: THREE.BackSide, depthWrite: false }));
+scene.add(glass);
+const edges = new THREE.LineSegments(new THREE.EdgesGeometry(boxGeo), new THREE.LineBasicMaterial({ color: '#40543A', transparent: true, opacity: 0.32 }));
+scene.add(edges);
+const backWall = new THREE.Mesh(new THREE.PlaneGeometry(BOX.W, BOX.H), new THREE.ShadowMaterial({ opacity: 0.08 }));
+backWall.position.set(0, BOX.H / 2, -BOX.D / 2 + 0.002); backWall.receiveShadow = true; scene.add(backWall);
+// 상자 받침
+const plinth = new THREE.Mesh(new THREE.BoxGeometry(BOX.W + 0.24, 0.12, BOX.D + 0.24), new THREE.MeshStandardMaterial({ color: '#e4dcc6', roughness: 0.9 }));
+plinth.position.y = -0.06; plinth.receiveShadow = true; scene.add(plinth);
+
+// 흙 둔덕 + 씨앗
+const soil = new THREE.Mesh(new THREE.SphereGeometry(0.55, 32, 16, 0, Math.PI * 2, 0, Math.PI / 2), new THREE.MeshStandardMaterial({ color: '#8a6a4a', roughness: 1 }));
+soil.scale.y = 0.32; soil.receiveShadow = true; soil.castShadow = true; scene.add(soil);
+const seed = new THREE.Mesh(new THREE.SphereGeometry(0.09, 20, 12), new THREE.MeshStandardMaterial({ color: '#c9a66b', roughness: 0.6 }));
+seed.scale.set(1, 0.7, 0.8); seed.position.set(0.08, 0.17, 0.12); seed.rotation.z = 0.6; seed.castShadow = true; scene.add(seed);
+
+/* ---------- 식물 상태 (누적 데이터) ---------- */
+const plant = {
+  pts: [],          // 기본 성장 경로 [x,y,z,...] — 경계 충돌로 만들어진 모양 포함, 고개 휨은 여기 저장 안 함
+  s: [],            // 각 점까지의 누적 길이
+  length: 0,
+  heading: new THREE.Vector3(0, 1, 0),
+  wander: new THREE.Vector3(),
+  touchedCeiling: false,
+  leaves: [],       // {s, ang, size, born}
+  budAt: -1,        // 봉오리 생긴 시각 (-1 = 아직)
+  bloom: 0,         // 0~1 누적
+  pending: 0,
+};
+function pushPoint(x, y, z) {
+  const n = plant.s.length;
+  if (n) {
+    const i = (n - 1) * 3;
+    plant.length += Math.hypot(x - plant.pts[i], y - plant.pts[i + 1], z - plant.pts[i + 2]);
+  }
+  plant.pts.push(x, y, z); plant.s.push(plant.length);
+}
+// 시작: 아주 작은 새싹
+pushPoint(0, 0.12, 0); pushPoint(0, 0.18, 0); pushPoint(0.005, 0.24, 0); pushPoint(0.012, 0.30, 0);
+
+const tmpV = new THREE.Vector3(), tmpA = new THREE.Vector3(), tmpB = new THREE.Vector3();
+const walls = [
+  { n: new THREE.Vector3(1, 0, 0),  d: p => p.x + LIM.x },
+  { n: new THREE.Vector3(-1, 0, 0), d: p => LIM.x - p.x },
+  { n: new THREE.Vector3(0, 1, 0),  d: p => p.y - LIM.yMin },
+  { n: new THREE.Vector3(0, -1, 0), d: p => LIM.yMax - p.y, ceiling: true },
+  { n: new THREE.Vector3(0, 0, 1),  d: p => p.z + LIM.z },
+  { n: new THREE.Vector3(0, 0, -1), d: p => LIM.z - p.z },
+];
+function growStep(ds) {
+  const n = plant.s.length, i = (n - 1) * 3;
+  const p = new THREE.Vector3(plant.pts[i], plant.pts[i + 1], plant.pts[i + 2]);
+  const h = plant.heading;
+  const steer = new THREE.Vector3();
+  for (const w of walls) {
+    const d = w.d(p);
+    if (d >= CFG.WALL_SENSE) continue;
+    const k = Math.pow(1 - Math.max(d, 0) / CFG.WALL_SENSE, 2);
+    steer.addScaledVector(w.n, k * CFG.WALL_PUSH);
+    // 벽을 따라 미끄러지는 힘 (현재 진행 방향의 벽-평행 성분 유지)
+    tmpA.copy(h).addScaledVector(w.n, -h.dot(w.n));
+    if (tmpA.lengthSq() < 0.01) tmpA.set(Math.random() < 0.5 ? 1 : -1, 0, 0).addScaledVector(w.n, -tmpA.dot(w.n));
+    steer.addScaledVector(tmpA.normalize(), k * CFG.WALL_SLIDE);
+    if (w.ceiling && d < 0.15) plant.touchedCeiling = true;
+  }
+  plant.wander.add(tmpB.set(Math.random() - 0.5, Math.random() - 0.5, (Math.random() - 0.5) * 0.6).multiplyScalar(1.2)).multiplyScalar(0.92);
+  steer.addScaledVector(plant.wander, CFG.WANDER);
+  steer.y += CFG.UP_BIAS * (plant.touchedCeiling ? 0.12 : 1);
+  // 목표 방향으로 회전하되 곡률 제한
+  const desired = tmpV.copy(h).addScaledVector(steer, ds).normalize();
+  const ang = h.angleTo(desired), maxA = CFG.MAX_TURN * ds;
+  if (ang > 1e-5) {
+    const axis = tmpA.crossVectors(h, desired).normalize();
+    if (axis.lengthSq() > 0.5) h.applyAxisAngle(axis, Math.min(ang, maxA)).normalize();
+  }
+  p.addScaledVector(h, ds);
+  p.x = THREE.MathUtils.clamp(p.x, -LIM.x, LIM.x);
+  p.y = THREE.MathUtils.clamp(p.y, LIM.yMin, LIM.yMax);
+  p.z = THREE.MathUtils.clamp(p.z, -LIM.z, LIM.z);
+  pushPoint(p.x, p.y, p.z);
+  if (plant.s.length > CFG.MAX_POINTS) simplifyPath();
+}
+function grow(amount) {
+  plant.pending += amount;
+  while (plant.pending >= CFG.STEP) { growStep(CFG.STEP); plant.pending -= CFG.STEP; }
+  if (plant.budAt < 0 && plant.length >= CFG.BUD_LENGTH) plant.budAt = clock;
+}
+// 성능용: 점 간격을 2배로 재샘플 (모양은 유지, 길이 기록 보존)
+let stepNow = CFG.STEP;
+function simplifyPath() {
+  const old = plant.pts, oldS = plant.s;
+  stepNow *= 2;
+  const np = [], ns = [];
+  let target = 0, j = 0;
+  while (j < oldS.length - 1) {
+    while (j < oldS.length - 2 && oldS[j + 1] < target) j++;
+    const t = THREE.MathUtils.clamp((target - oldS[j]) / Math.max(oldS[j + 1] - oldS[j], 1e-6), 0, 1);
+    for (let c = 0; c < 3; c++) np.push(old[j * 3 + c] + (old[(j + 1) * 3 + c] - old[j * 3 + c]) * t);
+    ns.push(target);
+    target += stepNow;
+    if (target > oldS[oldS.length - 1]) break;
+  }
+  const L = old.length;
+  np.push(old[L - 3], old[L - 2], old[L - 1]); ns.push(oldS[oldS.length - 1]);
+  plant.pts = np; plant.s = ns;
+}
+
+/* ---------- 고개 기울기: 비파괴 휨 (표시용 좌표만 계산) ---------- */
+let disp = new Float32Array(0);
+function computeDisplay(bend) {
+  const n = plant.s.length;
+  if (disp.length < n * 3) disp = new Float32Array(Math.ceil(n * 1.5) * 3);
+  const P = plant.pts, S = plant.s, L = Math.max(plant.length, 1.2);
+  disp[0] = P[0]; disp[1] = P[1]; disp[2] = P[2];
+  for (let i = 1; i < n; i++) {
+    const f = Math.min(1, S[i] / L);
+    const phi = bend * f;
+    const c = Math.cos(phi), sn = Math.sin(phi);
+    const dx = P[i * 3] - P[i * 3 - 3], dy = P[i * 3 + 1] - P[i * 3 - 2], dz = P[i * 3 + 2] - P[i * 3 - 1];
+    let x = disp[i * 3 - 3] + dx * c - dy * sn;
+    let y = disp[i * 3 - 2] + dx * sn + dy * c;
+    let z = disp[i * 3 - 1] + dz;
+    disp[i * 3] = THREE.MathUtils.clamp(x, -LIM.x, LIM.x);
+    disp[i * 3 + 1] = THREE.MathUtils.clamp(y, LIM.yMin, LIM.yMax);
+    disp[i * 3 + 2] = THREE.MathUtils.clamp(z, -LIM.z, LIM.z);
+  }
+  return n;
+}
+function dispTangent(i, n, out) {
+  const a = Math.max(0, i - 2), b = Math.min(n - 1, i + 2);
+  out.set(disp[b * 3] - disp[a * 3], disp[b * 3 + 1] - disp[a * 3 + 1], disp[b * 3 + 2] - disp[a * 3 + 2]);
+  if (out.lengthSq() < 1e-10) out.set(0, 1, 0);
+  return out.normalize();
+}
+function indexAtS(s) {
+  const S = plant.s; let lo = 0, hi = S.length - 1;
+  while (lo < hi) { const m = (lo + hi) >> 1; if (S[m] < s) lo = m + 1; else hi = m; }
+  return lo;
+}
+
+/* ---------- 줄기 메시 (직접 만든 튜브, 매 프레임 갱신) ---------- */
+const RAD = 8;
+let stemCap = 0, stemGeo, stemPos, stemNor;
+const stemMat = new THREE.MeshStandardMaterial({ color: '#5f7a4b', roughness: 0.55 });
+const stem = new THREE.Mesh(new THREE.BufferGeometry(), stemMat);
+stem.castShadow = true; stem.receiveShadow = true; scene.add(stem);
+function ensureStemCap(n) {
+  if (n <= stemCap) return;
+  stemCap = Math.ceil(n * 1.5) + 64;
+  stemGeo?.dispose();
+  stemGeo = new THREE.BufferGeometry();
+  stemPos = new Float32Array(stemCap * RAD * 3);
+  stemNor = new Float32Array(stemCap * RAD * 3);
+  const idx = new Uint32Array((stemCap - 1) * RAD * 6);
+  let k = 0;
+  for (let i = 0; i < stemCap - 1; i++) for (let r = 0; r < RAD; r++) {
+    const a = i * RAD + r, b = i * RAD + (r + 1) % RAD, c = a + RAD, d = b + RAD;
+    idx[k++] = a; idx[k++] = c; idx[k++] = b; idx[k++] = b; idx[k++] = c; idx[k++] = d;
+  }
+  stemGeo.setAttribute('position', new THREE.BufferAttribute(stemPos, 3).setUsage(THREE.DynamicDrawUsage));
+  stemGeo.setAttribute('normal', new THREE.BufferAttribute(stemNor, 3).setUsage(THREE.DynamicDrawUsage));
+  stemGeo.setIndex(new THREE.BufferAttribute(idx, 1));
+  stem.geometry = stemGeo;
+}
+const T = new THREE.Vector3(), N = new THREE.Vector3(), B = new THREE.Vector3(), Tp = new THREE.Vector3();
+function buildStem(n) {
+  ensureStemCap(n);
+  let first = true;
+  for (let i = 0; i < n; i++) {
+    dispTangent(i, n, T);
+    if (first) { N.set(1, 0, 0).addScaledVector(T, -T.x); if (N.lengthSq() < 1e-4) N.set(0, 0, 1); N.normalize(); first = false; }
+    else { N.addScaledVector(T, -N.dot(T)).normalize(); }
+    B.crossVectors(T, N);
+    const sRatio = plant.s[i] / Math.max(plant.length, 1e-3);
+    const radius = THREE.MathUtils.lerp(0.055, 0.036, Math.min(1, plant.s[i] / 4)) * (i === n - 1 ? 0.8 : 1) * (sRatio > 0.995 && plant.budAt < 0 ? 0.85 : 1);
+    for (let r = 0; r < RAD; r++) {
+      const a = r / RAD * Math.PI * 2, ca = Math.cos(a), sa = Math.sin(a);
+      const nx = N.x * ca + B.x * sa, ny = N.y * ca + B.y * sa, nz = N.z * ca + B.z * sa;
+      const o = (i * RAD + r) * 3;
+      stemPos[o] = disp[i * 3] + nx * radius; stemPos[o + 1] = disp[i * 3 + 1] + ny * radius; stemPos[o + 2] = disp[i * 3 + 2] + nz * radius;
+      stemNor[o] = nx; stemNor[o + 1] = ny; stemNor[o + 2] = nz;
+    }
+  }
+  stemGeo.attributes.position.needsUpdate = true;
+  stemGeo.attributes.normal.needsUpdate = true;
+  stemGeo.setDrawRange(0, Math.max(0, n - 1) * RAD * 6);
+  stemGeo.computeBoundingSphere();
+}
+const tipCap = new THREE.Mesh(new THREE.SphereGeometry(0.04, 12, 8), stemMat);
+tipCap.castShadow = true; scene.add(tipCap);
+
+/* ---------- 잎 (인스턴스, 개수 제한 없음 — 용량은 자동 확장) ---------- */
+function makeLeafGeo() {
+  const sh = new THREE.Shape();
+  sh.moveTo(0, 0);
+  sh.bezierCurveTo(0.16, 0.08, 0.19, 0.34, 0, 0.56);
+  sh.bezierCurveTo(-0.19, 0.34, -0.16, 0.08, 0, 0);
+  const g = new THREE.ShapeGeometry(sh, 10);
+  const p = g.attributes.position;
+  for (let i = 0; i < p.count; i++) {   // 살짝 오목하게 + 끝이 처지게
+    const x = p.getX(i), y = p.getY(i);
+    p.setZ(i, x * x * 2.2 - y * y * 0.35);
+  }
+  g.computeVertexNormals();
+  return g;
+}
+const leafGeo = makeLeafGeo();
+const leafMat = new THREE.MeshStandardMaterial({ color: '#ffffff', roughness: 0.6, side: THREE.DoubleSide });
+let leafCap = 0, leafMesh = null;
+const leafPalette = ['#7d9a5f', '#8fa874', '#6b8a50', '#A2B488'].map(c => new THREE.Color(c));
+function ensureLeafCap(n) {
+  if (n <= leafCap) return;
+  const cap = Math.max(32, leafCap * 2, n);
+  const m = new THREE.InstancedMesh(leafGeo, leafMat, cap);
+  m.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+  m.castShadow = true; m.receiveShadow = true; m.frustumCulled = false;
+  for (let i = 0; i < cap; i++) m.setColorAt(i, leafPalette[i % leafPalette.length]);
+  if (leafMesh) { scene.remove(leafMesh); leafMesh.dispose(); }
+  leafMesh = m; leafCap = cap; scene.add(m);
+}
+function addLeaf() {
+  const L = plant.length;
+  const s = L < 0.25 ? Math.random() * L : 0.08 + Math.random() * (L - 0.08);
+  plant.leaves.push({ s, ang: Math.random() * Math.PI * 2, size: 0.75 + Math.random() * 0.55, born: clock });
+  ensureLeafCap(plant.leaves.length);
+}
+const M4 = new THREE.Matrix4(), Q = new THREE.Quaternion(), SC = new THREE.Vector3(), POS = new THREE.Vector3();
+const XA = new THREE.Vector3(), YA = new THREE.Vector3(), ZA = new THREE.Vector3(), OUT = new THREE.Vector3();
+function updateLeaves(n) {
+  if (!leafMesh) return;
+  const count = plant.leaves.length;
+  for (let k = 0; k < count; k++) {
+    const lf = plant.leaves[k];
+    const i = Math.min(indexAtS(lf.s), n - 1);
+    dispTangent(i, n, T);
+    N.set(0, 0, 1).addScaledVector(T, -T.z); if (N.lengthSq() < 1e-4) N.set(1, 0, 0).addScaledVector(T, -T.x); N.normalize();
+    B.crossVectors(T, N);
+    OUT.copy(N).multiplyScalar(Math.cos(lf.ang)).addScaledVector(B, Math.sin(lf.ang)).normalize();
+    YA.copy(OUT).multiplyScalar(0.8).addScaledVector(T, 0.6).normalize();   // 잎이 뻗는 방향
+    XA.crossVectors(YA, T).normalize();
+    if (XA.lengthSq() < 1e-4) XA.set(1, 0, 0);
+    ZA.crossVectors(XA, YA).normalize();
+    M4.makeBasis(XA, YA, ZA);
+    Q.setFromRotationMatrix(M4);
+    const age = (clock - lf.born) / 0.45;
+    const g = age >= 1 ? 1 : 1 - Math.pow(1 - Math.max(age, 0), 3) * 1 + Math.sin(Math.min(age, 1) * Math.PI) * 0.12;
+    SC.setScalar(lf.size * g);
+    POS.set(disp[i * 3], disp[i * 3 + 1], disp[i * 3 + 2]).addScaledVector(OUT, 0.03);
+    M4.compose(POS, Q, SC);
+    leafMesh.setMatrixAt(k, M4);
+  }
+  leafMesh.count = count;
+  leafMesh.instanceMatrix.needsUpdate = true;
+}
+
+/* ---------- 데이지 꽃봉오리 / 꽃 ---------- */
+const flower = new THREE.Group(); flower.visible = false; scene.add(flower);
+function makePetalGeo() {
+  const sh = new THREE.Shape();
+  sh.moveTo(0, 0);
+  sh.bezierCurveTo(0.055, 0.04, 0.06, 0.36, 0.022, 0.47);
+  sh.quadraticCurveTo(0, 0.5, -0.022, 0.47);
+  sh.bezierCurveTo(-0.06, 0.36, -0.055, 0.04, 0, 0);
+  const g = new THREE.ShapeGeometry(sh, 10);
+  const p = g.attributes.position;
+  for (let i = 0; i < p.count; i++) { const x = p.getX(i), y = p.getY(i); p.setZ(i, x * x * 5 + y * y * 0.18); }
+  g.computeVertexNormals();
+  return g;
+}
+const petalGeo = makePetalGeo();
+const petalMat = new THREE.MeshStandardMaterial({ color: '#fbf8ef', roughness: 0.5, side: THREE.DoubleSide });
+const PETAL_BUD = new THREE.Color('#b9c79a'), PETAL_OPEN = new THREE.Color('#fbf8ef');
+const petals = [];
+const PETAL_N = 18;
+for (let i = 0; i < PETAL_N; i++) {
+  const yaw = new THREE.Object3D(); yaw.rotation.y = i / PETAL_N * Math.PI * 2 + (i % 2) * 0.08;
+  const tilt = new THREE.Object3D(); yaw.add(tilt);
+  const m = new THREE.Mesh(petalGeo, petalMat); m.castShadow = true;
+  tilt.add(m);
+  petals.push({ tilt, m, jitter: (Math.random() - 0.5) * 0.12, len: 0.92 + Math.random() * 0.16 });
+  flower.add(yaw);
+}
+const sepalMat = new THREE.MeshStandardMaterial({ color: '#6f8d55', roughness: 0.6, side: THREE.DoubleSide });
+const sepals = [];
+for (let i = 0; i < 7; i++) {
+  const yaw = new THREE.Object3D(); yaw.rotation.y = i / 7 * Math.PI * 2;
+  const tilt = new THREE.Object3D(); yaw.add(tilt);
+  const m = new THREE.Mesh(petalGeo, sepalMat); m.scale.set(1.5, 0.42, 1); m.castShadow = true;
+  tilt.add(m); sepals.push(tilt); flower.add(yaw);
+}
+const disc = new THREE.Mesh(new THREE.SphereGeometry(0.12, 24, 12), new THREE.MeshStandardMaterial({ color: '#D9BF83', roughness: 0.85 }));
+disc.scale.y = 0.45; disc.position.y = 0.03; disc.castShadow = true; flower.add(disc);
+const receptacle = new THREE.Mesh(new THREE.SphereGeometry(0.09, 16, 10), sepalMat);
+receptacle.scale.y = 0.8; flower.add(receptacle);
+const YUP = new THREE.Vector3(0, 1, 0);
+function easeOutBack(t) { const c = 1.6; return 1 + (c + 1) * Math.pow(t - 1, 3) + c * Math.pow(t - 1, 2); }
+function updateFlower(n) {
+  if (plant.budAt < 0) { flower.visible = false; tipCap.visible = true; return; }
+  flower.visible = true; tipCap.visible = false;
+  const i = n - 1;
+  dispTangent(i, n, T);
+  flower.position.set(disp[i * 3], disp[i * 3 + 1], disp[i * 3 + 2]);
+  flower.quaternion.setFromUnitVectors(YUP, T);
+  const appear = Math.min(1, (clock - plant.budAt) / 0.7);
+  const b = plant.bloom, e = b * b * (3 - 2 * b);
+  flower.scale.setScalar(easeOutBack(appear) * THREE.MathUtils.lerp(1.15, 1.2, e));
+  petalMat.color.copy(PETAL_BUD).lerp(PETAL_OPEN, Math.min(1, b * 2.2));
+  for (const p of petals) {
+    // 닫힘: 위로 모임(약 8°) → 열림: 옆으로 펼쳐지고 살짝 처짐(약 100°)
+    p.tilt.rotation.x = THREE.MathUtils.lerp(0.14, 1.75 + p.jitter, e);
+    const sc = THREE.MathUtils.lerp(0.42, 1, e);
+    p.m.scale.set(THREE.MathUtils.lerp(1.6, 1, e), sc * p.len, 1);
+  }
+  for (const s of sepals) s.rotation.x = THREE.MathUtils.lerp(0.35, 2.1, e);
+  disc.scale.set(THREE.MathUtils.lerp(0.35, 1, e), THREE.MathUtils.lerp(0.2, 0.45, e), THREE.MathUtils.lerp(0.35, 1, e));
+}
+
+/* ---------- 카메라 프레이밍 ---------- */
+let camYawDrag = 0, dragX = null;
+function resize() {
+  const w = innerWidth, h = innerHeight;
+  renderer.setSize(w, h, false);
+  cam.aspect = w / h;
+  const vh = h * 0.80;                          // 아래 버튼 영역 제외
+  const fov = THREE.MathUtils.degToRad(cam.fov);
+  const needH = BOX.H * 1.1 * (h / vh), needW = BOX.W * 1.12 / cam.aspect;
+  cam.userData.dist = Math.max(needH, needW) / 2 / Math.tan(fov / 2) + BOX.D / 2;
+  cam.userData.lookY = BOX.H / 2 - (BOX.H * 1.1 * (h / vh) - BOX.H * 1.1) / 2 * 0.95;
+  cam.updateProjectionMatrix();
+}
+addEventListener('resize', resize); resize();
+canvas.addEventListener('pointerdown', e => { dragX = e.clientX; });
+addEventListener('pointermove', e => { if (dragX != null) { camYawDrag = THREE.MathUtils.clamp(camYawDrag + (e.clientX - dragX) * 0.006, -1.1, 1.1); dragX = e.clientX; } });
+addEventListener('pointerup', () => { dragX = null; });
+function placeCamera(t) {
+  if (dragX == null) camYawDrag *= 0.985;
+  const yaw = Math.sin(t * 0.13) * 0.16 + camYawDrag, pitch = 0.13;
+  const d = cam.userData.dist;
+  cam.position.set(Math.sin(yaw) * Math.cos(pitch) * d, cam.userData.lookY + Math.sin(pitch) * d, Math.cos(yaw) * Math.cos(pitch) * d);
+  cam.lookAt(0, cam.userData.lookY, 0);
+}
+
+/* ---------- 얼굴 인식 ---------- */
+const video = document.getElementById('video');
+const face = { present: false, smile: 0, jaw: 0, blink: 0, roll: 0, lastSeen: 0 };
+const st = { smileOn: false, jawOn: false, eyesClosed: false, closedAt: 0, bend: 0 };
+let landmarker = null, stream = null, lastVideoTime = -1, frozen = false, running = false;
+
+function ema(prev, v, dt, tau) { return prev + (v - prev) * (1 - Math.exp(-dt / tau)); }
+
+async function startCamera() {
+  show('loadOv'); hide('startOv'); hide('errOv');
+  setLoad('카메라를 켜는 중…');
+  try {
+    stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'user', width: { ideal: 640 }, height: { ideal: 480 } }, audio: false });
+  } catch (err) {
+    const denied = err && (err.name === 'NotAllowedError' || err.name === 'SecurityError');
+    return showError('카메라를 켤 수 없어요', denied
+      ? '카메라 권한이 꺼져 있어요. 브라우저 설정에서 이 사이트의 카메라를 허용한 뒤 다시 시도해 주세요.'
+      : '이 브라우저에서는 카메라를 쓸 수 없어요. Safari나 Chrome에서 열어 주세요.');
+  }
+  video.srcObject = stream;
+  try { await video.play(); } catch (_) {}
+  document.getElementById('camDot').classList.add('on');
+  if (!landmarker) {
+    setLoad('얼굴 인식 준비 중… (처음 한 번은 조금 걸려요)');
+    try {
+      const { FilesetResolver, FaceLandmarker } = await import('@mediapipe/tasks-vision');
+      const files = await FilesetResolver.forVisionTasks('https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/wasm');
+      const opts = (delegate) => ({
+        baseOptions: { modelAssetPath: 'https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task', delegate },
+        runningMode: 'VIDEO', numFaces: 1, outputFaceBlendshapes: true, outputFacialTransformationMatrixes: false,
+      });
+      try { landmarker = await FaceLandmarker.createFromOptions(files, opts('GPU')); }
+      catch (_) { landmarker = await FaceLandmarker.createFromOptions(files, opts('CPU')); }
+    } catch (err) {
+      stopCamera();
+      return showError('얼굴 인식을 불러오지 못했어요', '인터넷 연결을 확인하고 다시 시도해 주세요.');
+    }
+  }
+  hide('loadOv');
+  running = true;
+  document.getElementById('recBtn').disabled = false;
+}
+function stopCamera() {
+  running = false;
+  stream?.getTracks().forEach(t => t.stop());
+  stream = null; video.srcObject = null;
+  document.getElementById('camDot').classList.remove('on');
+}
+function detect(now) {
+  if (!running || !landmarker || video.readyState < 2) return;
+  if (video.currentTime === lastVideoTime) return;
+  lastVideoTime = video.currentTime;
+  let res;
+  try { res = landmarker.detectForVideo(video, now); } catch (_) { return; }
+  const bs = res.faceBlendshapes?.[0]?.categories;
+  const lm = res.faceLandmarks?.[0];
+  if (!bs || !lm) { face.present = false; return; }
+  const get = name => bs.find(c => c.categoryName === name)?.score ?? 0;
+  face.present = true; face.lastSeen = now;
+  face.rawSmile = (get('mouthSmileLeft') + get('mouthSmileRight')) / 2;
+  face.rawJaw = get('jawOpen');
+  face.rawBlinkL = get('eyeBlinkLeft'); face.rawBlinkR = get('eyeBlinkRight');
+  // 고개 기울기(roll): 두 눈 바깥 꼬리를 잇는 선의 각도
+  const a = lm[33], b = lm[263];
+  const vw = video.videoWidth || 640, vh = video.videoHeight || 480;
+  face.rawRoll = Math.atan2((b.y - a.y) * vh, (b.x - a.x) * vw);
+}
+
+/* 테스트 전용 키보드 흉내 (?sim) */
+const keys = new Set();
+if (SIM) {
+  addEventListener('keydown', e => { keys.add(e.key.toLowerCase()); });
+  addEventListener('keyup', e => { keys.delete(e.key.toLowerCase()); });
+}
+function simInput() {
+  face.present = true;
+  face.rawSmile = keys.has('s') ? 0.9 : 0.05;
+  face.rawJaw = keys.has('o') ? 0.8 : 0.03;
+  const bl = keys.has('b') ? 0.9 : 0.05; face.rawBlinkL = bl; face.rawBlinkR = bl;
+  face.rawRoll = keys.has('arrowright') ? -0.45 : keys.has('arrowleft') ? 0.45 : 0;
+}
+
+/* ---------- 표정 → 식물 ---------- */
+function applyFace(dt, nowMs) {
+  if (!face.present) return false;
+  face.smile = ema(face.smile, face.rawSmile, dt, CFG.TAU_FACE);
+  face.jaw = ema(face.jaw, face.rawJaw, dt, CFG.TAU_FACE);
+  face.blink = (face.rawBlinkL + face.rawBlinkR) / 2;
+  face.roll = ema(face.roll, face.rawRoll, dt, CFG.TAU_ROLL);
+
+  // 미소 → 줄기 (동시 인식: 각각 독립 판정)
+  if (!st.smileOn && face.smile > CFG.SMILE_ON) st.smileOn = true;
+  else if (st.smileOn && face.smile < CFG.SMILE_OFF) st.smileOn = false;
+  if (st.smileOn) {
+    const k = THREE.MathUtils.clamp((face.smile - CFG.SMILE_OFF) / (1 - CFG.SMILE_OFF), 0.25, 1);
+    grow(CFG.GROW_SPEED * k * dt);
+  }
+  // 입 벌리기 → 개화 (봉오리 생긴 뒤에만)
+  if (!st.jawOn && face.jaw > CFG.JAW_ON) st.jawOn = true;
+  else if (st.jawOn && face.jaw < CFG.JAW_OFF) st.jawOn = false;
+  if (st.jawOn && plant.budAt >= 0) {
+    const k = THREE.MathUtils.clamp((face.jaw - CFG.JAW_OFF) / (0.8 - CFG.JAW_OFF), 0.25, 1);
+    plant.bloom = Math.min(1, plant.bloom + CFG.BLOOM_SPEED * k * dt);
+  }
+  // 눈 깜빡임 → 잎 1장 (감았다 뜨는 한 사이클)
+  const L = face.rawBlinkL, R = face.rawBlinkR;
+  if (!st.eyesClosed && L > CFG.BLINK_CLOSED && R > CFG.BLINK_CLOSED) { st.eyesClosed = true; st.closedAt = nowMs; }
+  else if (st.eyesClosed && L < CFG.BLINK_OPEN && R < CFG.BLINK_OPEN) {
+    st.eyesClosed = false;
+    const dur = nowMs - st.closedAt;
+    if (dur >= CFG.BLINK_MIN_MS && dur <= CFG.BLINK_MAX_MS) addLeaf();
+  }
+  return true;
+}
+function targetBend() {
+  if (!face.present) return 0;
+  const dz = THREE.MathUtils.degToRad(CFG.ROLL_DEADZONE_DEG), mx = THREE.MathUtils.degToRad(CFG.ROLL_MAX_DEG);
+  let r = face.roll;
+  r = Math.sign(r) * Math.max(0, Math.abs(r) - dz);
+  return THREE.MathUtils.clamp(r, -mx, mx) * CFG.TILT_GAIN;
+}
+
+/* ---------- UI ---------- */
+const $ = id => document.getElementById(id);
+function show(id) { $(id).hidden = false; } function hide(id) { $(id).hidden = true; }
+function setLoad(t) { $('loadMsg').textContent = t; }
+function showError(title, msg) { hide('loadOv'); $('errTitle').textContent = title; $('errMsg').textContent = msg; show('errOv'); }
+$('startBtn').onclick = () => { SIM ? (hide('startOv'), running = true, $('recBtn').disabled = false) : startCamera(); };
+$('retryBtn').onclick = startCamera;
+$('recBtn').onclick = () => {
+  if (frozen) return;
+  frozen = true;                  // 이 순간의 모습(고개 휨 포함)으로 고정
+  stopCamera();
+  $('recBtn').disabled = true;
+  $('guide').textContent = '기록했어요. 이 모습 그대로 멈췄어요.';
+  show('doneOv');
+};
+$('viewBtn').onclick = () => hide('doneOv');
+$('againBtn').onclick = () => location.reload();
+$('dbgBtn').onclick = () => { $('debug').hidden = !$('debug').hidden; };
+if (/KAKAOTALK|Instagram|FBAN|FBAV|Line\/|NAVER\(inapp|DaumApps/i.test(navigator.userAgent)) show('inappNote');
+if (SIM) { $('startBtn').textContent = '시뮬레이션으로 시작 (S·O·B·←→)'; }
+
+let guideKey = '';
+function updateGuide() {
+  if (frozen || !running) return;
+  let key, text;
+  if (!face.present) { key = 'noface'; text = '얼굴이 보이지 않아요. 화면을 정면으로 봐 주세요.'; }
+  else if (plant.budAt < 0) { key = 'grow'; text = '웃으면 줄기가 자라요. 고개를 기울이거나 눈을 깜빡여 보세요.'; }
+  else if (plant.bloom < 0.02) { key = 'bud'; text = '꽃봉오리가 생겼어요! 입을 벌리면 꽃이 피어요.'; }
+  else { key = 'free'; text = '웃으면 계속 자라고, 입을 벌리면 더 피어요.'; }
+  if (key !== guideKey) { guideKey = key; $('guide').textContent = text; }
+}
+function setBar(id, vid, v, on, label) {
+  $(id).style.width = (Math.max(0, Math.min(1, v)) * 100).toFixed(0) + '%';
+  $(id).classList.toggle('on', !!on);
+  $(vid).textContent = label ?? v.toFixed(2);
+}
+let fpsAcc = 0, fpsN = 0, fps = 0;
+function updateDebug(dt) {
+  fpsAcc += dt; fpsN++; if (fpsAcc > 0.5) { fps = fpsN / fpsAcc; fpsAcc = 0; fpsN = 0; }
+  if ($('debug').hidden) return;
+  setBar('bSmile', 'vSmile', face.smile, st.smileOn);
+  setBar('bJaw', 'vJaw', face.jaw, st.jawOn);
+  setBar('bBlink', 'vBlink', face.blink, st.eyesClosed);
+  const deg = THREE.MathUtils.radToDeg(face.roll);
+  setBar('bRoll', 'vRoll', Math.abs(deg) / 40, Math.abs(deg) > CFG.ROLL_DEADZONE_DEG, deg.toFixed(0) + '°');
+  $('meta').textContent = `줄기 ${plant.length.toFixed(1)} · 잎 ${plant.leaves.length} · 개화 ${(plant.bloom * 100).toFixed(0)}% · 점 ${plant.s.length} · ${fps.toFixed(0)}fps`;
+}
+
+/* ---------- 메인 루프 ---------- */
+let clock = 0, last = performance.now();
+function frame(now) {
+  const dt = Math.min(0.05, (now - last) / 1000); last = now; clock += dt;
+  if (!frozen && running) {
+    if (SIM) simInput(); else detect(now);
+    if (!SIM && face.present && now - face.lastSeen > 400) face.present = false;
+    applyFace(dt, now);          // 얼굴이 없으면 성장 일시정지
+    st.bend = ema(st.bend, targetBend(), dt, 0.12);   // 고개를 바로 세우면 0으로 돌아옴
+  }
+  const n = computeDisplay(st.bend);
+  buildStem(n);
+  tipCap.position.set(disp[(n - 1) * 3], disp[(n - 1) * 3 + 1], disp[(n - 1) * 3 + 2]);
+  updateLeaves(n);
+  updateFlower(n);
+  placeCamera(clock);
+  renderer.render(scene, cam);
+  updateGuide(); updateDebug(dt);
+  requestAnimationFrame(frame);
+}
+requestAnimationFrame(frame);
+
+// 테스트 자동화를 위한 훅
+window.__garden = { plant, st, face, grow, addLeaf, setBloom: v => { plant.bloom = v; }, setBend: v => { st.bend = v; }, freeze: () => { frozen = true; } };
+</script>
+</body>
+</html>
