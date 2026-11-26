@@ -17,7 +17,7 @@
 *{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
 html,body{height:100%;background:var(--cream);color:var(--ink);overflow:hidden;
   font:15px/1.5 -apple-system,BlinkMacSystemFont,"Apple SD Gothic Neo","Pretendard","Noto Sans KR",sans-serif;
-  -webkit-user-select:none;user-select:none;overscroll-behavior:none}
+  -webkit-user-select:none;user-select:none;overscroll-behavior:none;word-break:keep-all}
 #stage{position:fixed;inset:0;display:block;width:100%;height:100%;touch-action:none}
 
 .top{position:fixed;left:0;right:0;top:0;padding:calc(var(--sat) + 14px) 18px 0;display:flex;align-items:flex-start;justify-content:space-between;pointer-events:none}
@@ -38,7 +38,7 @@ html,body{height:100%;background:var(--cream);color:var(--ink);overflow:hidden;
 .overlay[hidden]{display:none}
 .overlay h1{font-family:"Cormorant Garamond",serif;font-weight:500;font-style:italic;font-size:40px;line-height:1.05;color:var(--green)}
 .overlay h2{font-size:19px;font-weight:600;color:var(--green)}
-.overlay p{font-size:14.5px;color:#55604f;max-width:300px}
+.overlay p{text-wrap:balance;font-size:14.5px;color:#55604f;max-width:300px}
 .overlay .note{font-size:12.5px;color:#7a8273}
 .btn{height:52px;min-width:220px;padding:0 24px;border-radius:999px;border:0;background:var(--green);color:var(--cream);font-size:16px;font-weight:600}
 .btn.ghost{background:transparent;color:var(--green);border:1px solid var(--green)}
@@ -84,6 +84,7 @@ html,body{height:100%;background:var(--cream);color:var(--ink);overflow:hidden;
   <h1>Garden of<br>Expressions</h1>
   <p>웃으면 줄기가 자라고, 입을 벌리면 꽃이 피어요.<br>고개를 기울이거나 눈을 깜빡여 보세요.</p>
   <button class="btn" id="startBtn" type="button">카메라 켜고 시작하기</button>
+  <button class="btn ghost" id="newBtn" type="button" hidden>처음부터 새로 심기</button>
   <p class="note">얼굴 영상은 이 기기 안에서만 처리돼요.<br>어디에도 저장하거나 보내지 않아요.</p>
   <p class="note" id="inappNote" hidden>카카오톡·인스타그램 안에서 열었다면 카메라가 안 될 수 있어요.<br>오른쪽 위 메뉴에서 ‘다른 브라우저로 열기’를 눌러 주세요.</p>
 </div>
@@ -125,21 +126,24 @@ const CFG = {
   JAW_ON: 0.30,   JAW_OFF: 0.18,
   BLINK_CLOSED: 0.55, BLINK_OPEN: 0.30,
   BLINK_MIN_MS: 40, BLINK_MAX_MS: 1000,   // 이보다 길게 감으면(웃을 때 눈 찡그림 등) 깜빡임으로 안 셈
-  ROLL_DEADZONE_DEG: 4, ROLL_MAX_DEG: 35,
+  ROLL_DEADZONE_DEG: 6, ROLL_MAX_DEG: 30,
   // 평활화 시간상수 (초)
   TAU_FACE: 0.08, TAU_ROLL: 0.15,
   // 성장
   GROW_SPEED: 0.9,      // 미소 최대일 때 초당 줄기 길이 (월드 단위)
   BUD_LENGTH: 1.6,      // 이 길이가 되면 꽃봉오리 생김
-  BLOOM_SPEED: 0.35,    // 입 최대로 벌렸을 때 초당 개화량 (0→1)
-  TILT_GAIN: 1.0,       // 고개 각도 → 실시간 휨 배율 (고개 세우면 풀림)
-  TILT_STEER: 7,        // 웃으며 자랄 때 고개 방향으로 줄기가 틀어지는 힘 (흔적으로 남음)
+  BLOOM_SPEED: 0.35,
+  BUD_SIZE: 1.6, FLOWER_SIZE: 1.9,   // 꽃봉오리 / 활짝 핀 꽃 크기 배율    // 입 최대로 벌렸을 때 초당 개화량 (0→1)
+  TILT_GAIN: 0.6,       // 고개 각도 → 실시간 휨 배율 (고개 세우면 풀림)
+  TILT_STEER: 2.6,        // 웃으며 자랄 때 고개 방향으로 줄기가 틀어지는 힘 (흔적으로 남음)
   JAW_SMILE_LEAK: 0.55, // 입을 벌리면 미소 값도 같이 오르는 현상 보정 (입 벌림 × 이 값만큼 미소에서 뺌)
   STEP: 0.05,           // 경로 점 간격
   MAX_POINTS: 3000,     // 넘으면 경로 단순화(점 간격 2배로 재샘플)
   // 투명 상자 안에서의 움직임
   WALL_SENSE: 0.7, WALL_PUSH: 9, WALL_SLIDE: 5, WALL_PAD: 0.22,
-  UP_BIAS: 1.4,         // 위(처음) 또는 아래(천장에 닿은 뒤)로 향하는 힘
+  UP_BIAS: 1.4,         // 위로 향하는 힘
+  DOWN_BIAS: 0.8,       // 천장에 닿은 뒤 아래로 향하는 힘 (위보다 약하게 → 축 늘어지는 느낌)
+  DROP_MIN: 0.25, DROP_MAX: 0.45,   // 천장에서 상자 높이의 이 비율만큼 내려가면 다시 위로
   WANDER: 0.9,          // 자연스러운 구불거림 정도 (클수록 꼬불꼬불)
   MAX_TURN: 3.2,
   BOX_H: 6, BOX_D: 2.4,
@@ -213,7 +217,8 @@ const plant = {
   wander: new THREE.Vector3(),
   touchedCeiling: false,
   tiltSteer: 0,     // 현재 고개 기울기 (성장 방향 조종용)
-  goalY: 1,         // 1 = 위로, -1 = 아래로 (천장/바닥에 닿을 때마다 바뀜)
+  goalY: 1,
+  turnUpAt: 0,      // 이 높이까지 내려가면 다시 위로         // 1 = 위로, -1 = 아래로 (천장/바닥에 닿을 때마다 바뀜)
   leaves: [],       // {s, ang, size, born}
   budAt: -1,        // 봉오리 생긴 시각 (-1 = 아직)
   bloom: 0,         // 0~1 누적
@@ -254,12 +259,16 @@ function growStep(ds) {
     if (tmpA.lengthSq() < 0.01) tmpA.set(Math.random() < 0.5 ? 1 : -1, 0, 0).addScaledVector(w.n, -tmpA.dot(w.n));
     // 천장·바닥에서는 미끄러지지 않고 반대 방향으로 돌아서도록 옆 힘을 약하게
     steer.addScaledVector(tmpA.normalize(), k * CFG.WALL_SLIDE * (w.ceiling || w.floor ? 0.25 : 1));
-    if (w.ceiling && d < 0.35) { plant.touchedCeiling = true; plant.goalY = -1; }
+    if (w.ceiling && d < 0.35 && plant.goalY > 0) {
+      plant.touchedCeiling = true; plant.goalY = -1;
+      plant.turnUpAt = p.y - BOX.H * THREE.MathUtils.lerp(CFG.DROP_MIN, CFG.DROP_MAX, Math.random());
+    }
     if (w.floor && d < 0.35 && plant.touchedCeiling) plant.goalY = 1;
   }
   plant.wander.add(tmpB.set(Math.random() - 0.5, Math.random() - 0.5, (Math.random() - 0.5) * 0.6).multiplyScalar(1.2)).multiplyScalar(0.92);
   steer.addScaledVector(plant.wander, CFG.WANDER);
-  steer.y += CFG.UP_BIAS * plant.goalY;
+  steer.y += plant.goalY > 0 ? CFG.UP_BIAS : -CFG.DOWN_BIAS;
+  if (plant.goalY < 0 && p.y < plant.turnUpAt) plant.goalY = 1;
   // 고개 기울기 → 자라는 방향을 화면 좌우로 틀어서 모양에 흔적을 남김
   steer.x += -plant.tiltSteer * CFG.TILT_STEER;
   // 목표 방향으로 회전하되 곡률 제한
@@ -464,7 +473,7 @@ function makePetalGeo() {
   return g;
 }
 const petalGeo = makePetalGeo();
-const petalMat = new THREE.MeshStandardMaterial({ color: '#fbf8ef', roughness: 0.5, side: THREE.DoubleSide });
+const petalMat = new THREE.MeshStandardMaterial({ color: '#fbf8ef', roughness: 0.5, side: THREE.DoubleSide, emissive: '#fffaf0', emissiveIntensity: 0.22 });  // 뒷면·그늘에서도 꽃잎이 회색으로 죽지 않게
 const PETAL_BUD = new THREE.Color('#b9c79a'), PETAL_OPEN = new THREE.Color('#fbf8ef');
 const petals = [];
 const PETAL_N = 18;
@@ -499,7 +508,7 @@ function updateFlower(n) {
   flower.quaternion.setFromUnitVectors(YUP, T);
   const appear = Math.min(1, (clock - plant.budAt) / 0.7);
   const b = plant.bloom, e = b * b * (3 - 2 * b);
-  flower.scale.setScalar(easeOutBack(appear) * THREE.MathUtils.lerp(1.15, 1.2, e));
+  flower.scale.setScalar(easeOutBack(appear) * THREE.MathUtils.lerp(CFG.BUD_SIZE, CFG.FLOWER_SIZE, e));
   petalMat.color.copy(PETAL_BUD).lerp(PETAL_OPEN, Math.min(1, b * 2.2));
   for (const p of petals) {
     // 닫힘: 위로 모임(약 8°) → 열림: 옆으로 펼쳐지고 살짝 처짐(약 100°)
@@ -548,6 +557,7 @@ async function startCamera() {
   show('loadOv'); hide('startOv'); hide('errOv');
   setLoad('카메라를 켜는 중…');
   try {
+    stream?.getTracks().forEach(t => t.stop()); lastVideoTime = -1;
     stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'user', width: { ideal: 640 }, height: { ideal: 480 } }, audio: false });
   } catch (err) {
     const denied = err && (err.name === 'NotAllowedError' || err.name === 'SecurityError');
@@ -670,13 +680,14 @@ $('retryBtn').onclick = startCamera;
 $('recBtn').onclick = () => {
   if (frozen) return;
   frozen = true;                  // 이 순간의 모습(고개 휨 포함)으로 고정
+  clearDraft();
   stopCamera();
   $('recBtn').disabled = true;
   $('guide').textContent = '기록했어요. 이 모습 그대로 멈췄어요.';
   show('doneOv');
 };
 $('viewBtn').onclick = () => hide('doneOv');
-$('againBtn').onclick = () => location.reload();
+$('againBtn').onclick = () => { clearDraft(); location.reload(); };
 $('dbgBtn').onclick = () => { $('debug').hidden = !$('debug').hidden; };
 if (/KAKAOTALK|Instagram|FBAN|FBAV|Line\/|NAVER\(inapp|DaumApps/i.test(navigator.userAgent)) show('inappNote');
 if (SIM) { $('startBtn').textContent = '시뮬레이션으로 시작 (S·O·B·←→)'; }
@@ -719,7 +730,7 @@ function frame(now) {
     if (SIM) simInput(); else detect(now);
     if (!SIM && face.present && now - face.lastSeen > 400) face.present = false;
     applyFace(dt, now);          // 얼굴이 없으면 성장 일시정지
-    st.bend = ema(st.bend, targetBend(), dt, 0.12);   // 고개를 바로 세우면 0으로 돌아옴
+    st.bend = ema(st.bend, targetBend(), dt, 0.35);   // 고개를 바로 세우면 0으로 돌아옴
     plant.tiltSteer = st.bend / Math.max(CFG.TILT_GAIN, 1e-3);
   }
   const n = computeDisplay(st.bend);
@@ -733,6 +744,55 @@ function frame(now) {
   requestAnimationFrame(frame);
 }
 requestAnimationFrame(frame);
+
+/* ---------- 키우던 식물 이어가기 ----------
+   화면을 끄거나 다른 앱에 다녀오면 iOS가 카메라를 끊고, 오래 비우면 페이지를 새로 불러오기도 해요.
+   그래서 (1) 돌아오면 카메라를 자동으로 다시 켜고 (2) 키우던 식물을 기기에 임시 저장했다가 복원해요.
+   임시 저장은 이 기기 안에만 남고, 기록하거나 새로 심으면 지워져요. 얼굴 정보는 저장하지 않아요. */
+const DRAFT_KEY = 'goe-draft-v1', DRAFT_MAX_AGE = 1000 * 60 * 60 * 6;   // 6시간 지나면 버림
+function saveDraft() {
+  if (frozen || plant.s.length < 2) return;
+  try {
+    localStorage.setItem(DRAFT_KEY, JSON.stringify({
+      t: Date.now(), pts: plant.pts.map(v => +v.toFixed(4)), s: plant.s.map(v => +v.toFixed(4)), length: plant.length,
+      heading: plant.heading.toArray(), touchedCeiling: plant.touchedCeiling, goalY: plant.goalY, turnUpAt: plant.turnUpAt,
+      leaves: plant.leaves.map(l => [+l.s.toFixed(3), +l.ang.toFixed(3), +l.size.toFixed(3)]),
+      bud: plant.budAt >= 0, bloom: plant.bloom, stepNow,
+    }));
+  } catch (_) {}
+}
+function clearDraft() { try { localStorage.removeItem(DRAFT_KEY); } catch (_) {} }
+function loadDraft() {
+  try {
+    const d = JSON.parse(localStorage.getItem(DRAFT_KEY) || 'null');
+    if (!d || Date.now() - d.t > DRAFT_MAX_AGE || !Array.isArray(d.pts) || d.pts.length < 6) return false;
+    plant.pts = d.pts; plant.s = d.s; plant.length = d.length;
+    plant.heading.fromArray(d.heading).normalize();
+    plant.touchedCeiling = !!d.touchedCeiling; plant.goalY = d.goalY === -1 ? -1 : 1; plant.turnUpAt = +d.turnUpAt || 0;
+    plant.leaves = d.leaves.map(([s, ang, size]) => ({ s, ang, size, born: -10 }));
+    plant.budAt = d.bud ? -10 : -1; plant.bloom = Math.min(1, Math.max(0, +d.bloom || 0));
+    stepNow = d.stepNow || CFG.STEP;
+    if (plant.leaves.length) ensureLeafCap(plant.leaves.length);
+    return true;
+  } catch (_) { return false; }
+}
+if (loadDraft()) {
+  document.querySelector('#startOv p').textContent = '키우던 식물이 그대로 있어요. 이어서 키워 볼까요?';
+  $('startBtn').textContent = '이어서 키우기';
+  $('newBtn').hidden = false;
+}
+$('newBtn').onclick = () => { clearDraft(); location.reload(); };
+setInterval(() => { if (running && !frozen) saveDraft(); }, 2000);
+addEventListener('pagehide', saveDraft);
+document.addEventListener('visibilitychange', async () => {
+  if (document.hidden) { saveDraft(); face.present = false; return; }
+  if (SIM || frozen || !running) return;
+  const live = stream && stream.getVideoTracks().some(t => t.readyState === 'live');
+  if (live) { try { await video.play(); } catch (_) {} return; }
+  $('guide').textContent = '카메라를 다시 켜는 중이에요…'; guideKey = '';
+  running = false;
+  await startCamera();          // 모델은 이미 받아 둔 상태라 금방 다시 켜져요
+});
 
 // 테스트 자동화를 위한 훅
 window.__garden = { plant, st, face, grow, addLeaf, setBloom: v => { plant.bloom = v; }, setBend: v => { st.bend = v; }, freeze: () => { frozen = true; } };
