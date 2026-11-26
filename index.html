@@ -45,13 +45,13 @@ html,body{height:100%;background:var(--cream);color:var(--ink);overflow:hidden;
 .spinner{width:28px;height:28px;border-radius:50%;border:3px solid rgba(64,84,58,.15);border-top-color:var(--green);animation:spin 1s linear infinite}
 @keyframes spin{to{transform:rotate(360deg)}}
 
-.debug{position:fixed;right:12px;top:calc(var(--sat) + 52px);width:176px;background:rgba(244,241,232,.92);border:1px solid var(--line);border-radius:12px;padding:10px 12px;font-size:11.5px;color:var(--green)}
+.debug{font-size:10.5px !important;position:fixed;right:10px;top:calc(var(--sat) + 52px);width:150px;pointer-events:none;opacity:.85;background:rgba(244,241,232,.75);border:1px solid var(--line);border-radius:12px;padding:10px 12px;font-size:11.5px;color:var(--green)}
 .debug[hidden]{display:none}
-.debug .row{display:grid;grid-template-columns:52px 1fr 34px;gap:6px;align-items:center;margin:3px 0}
+.debug .row{display:grid;grid-template-columns:42px 1fr 30px;gap:6px;align-items:center;margin:3px 0}
 .debug .bar{height:6px;background:rgba(64,84,58,.12);border-radius:3px;overflow:hidden}
 .debug .bar i{display:block;height:100%;width:0;background:var(--sage)}
 .debug .bar i.on{background:var(--green)}
-.debug .meta{margin-top:6px;border-top:1px solid var(--line);padding-top:6px;line-height:1.6}
+.debug .meta{white-space:pre-line;margin-top:6px;border-top:1px solid var(--line);padding-top:6px;line-height:1.6}
 </style>
 </head>
 <body>
@@ -116,7 +116,8 @@ import * as THREE from 'three';
    ============================================================ */
 const CFG = {
   // 인식 임계값 (켜짐 / 꺼짐 — 히스테리시스)
-  SMILE_ON: 0.45, SMILE_OFF: 0.30,
+  SMILE_ON: 0.20, SMILE_OFF: 0.10,   // 자연스러운 미소 기준 (실기기 1차 조정)
+  SMILE_FULL: 0.50,                   // 이 값 이상이면 최대 속도로 성장
   JAW_ON: 0.30,   JAW_OFF: 0.18,
   BLINK_CLOSED: 0.55, BLINK_OPEN: 0.30,
   BLINK_MIN_MS: 40, BLINK_MAX_MS: 1000,   // 이보다 길게 감으면(웃을 때 눈 찡그림 등) 깜빡임으로 안 셈
@@ -617,7 +618,7 @@ function applyFace(dt, nowMs) {
   if (!st.smileOn && face.smile > CFG.SMILE_ON) st.smileOn = true;
   else if (st.smileOn && face.smile < CFG.SMILE_OFF) st.smileOn = false;
   if (st.smileOn) {
-    const k = THREE.MathUtils.clamp((face.smile - CFG.SMILE_OFF) / (1 - CFG.SMILE_OFF), 0.25, 1);
+    const k = THREE.MathUtils.clamp((face.smile - CFG.SMILE_OFF) / (CFG.SMILE_FULL - CFG.SMILE_OFF), 0.35, 1);
     grow(CFG.GROW_SPEED * k * dt);
   }
   // 입 벌리기 → 개화 (봉오리 생긴 뒤에만)
@@ -682,15 +683,18 @@ function setBar(id, vid, v, on, label) {
   $(vid).textContent = label ?? v.toFixed(2);
 }
 let fpsAcc = 0, fpsN = 0, fps = 0;
+const peak = { smile: 0, jaw: 0, t: 0 };
 function updateDebug(dt) {
   fpsAcc += dt; fpsN++; if (fpsAcc > 0.5) { fps = fpsN / fpsAcc; fpsAcc = 0; fpsN = 0; }
+  peak.t += dt; if (peak.t > 3) { peak.t = 0; peak.smile *= 0.5; peak.jaw *= 0.5; }
+  peak.smile = Math.max(peak.smile, face.smile); peak.jaw = Math.max(peak.jaw, face.jaw);
   if ($('debug').hidden) return;
   setBar('bSmile', 'vSmile', face.smile, st.smileOn);
   setBar('bJaw', 'vJaw', face.jaw, st.jawOn);
   setBar('bBlink', 'vBlink', face.blink, st.eyesClosed);
   const deg = THREE.MathUtils.radToDeg(face.roll);
   setBar('bRoll', 'vRoll', Math.abs(deg) / 40, Math.abs(deg) > CFG.ROLL_DEADZONE_DEG, deg.toFixed(0) + '°');
-  $('meta').textContent = `줄기 ${plant.length.toFixed(1)} · 잎 ${plant.leaves.length} · 개화 ${(plant.bloom * 100).toFixed(0)}% · 점 ${plant.s.length} · ${fps.toFixed(0)}fps`;
+  $('meta').textContent = `최근 최고 · 미소 ${peak.smile.toFixed(2)} · 입 ${peak.jaw.toFixed(2)}\n줄기 ${plant.length.toFixed(1)} · 잎 ${plant.leaves.length} · 개화 ${(plant.bloom * 100).toFixed(0)}% · 점 ${plant.s.length} · ${fps.toFixed(0)}fps`;
 }
 
 /* ---------- 메인 루프 ---------- */
