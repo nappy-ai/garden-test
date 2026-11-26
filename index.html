@@ -133,6 +133,9 @@ const CFG = {
   GROW_SPEED: 0.9,      // 미소 최대일 때 초당 줄기 길이 (월드 단위)
   BUD_LENGTH: 1.6,      // 이 길이가 되면 꽃봉오리 생김
   BLOOM_SPEED: 0.35,
+  LEAF_FLOWER_CLEAR: 1.1,
+  LEAF_TRIES: 3,        // 잎 위치 후보 수 (클수록 일정한 간격, 작을수록 자유분방)
+  TOUCH_PAD: 0.1, BEND_AMOUNT: 2.2,   // 잎·꽃잎이 닿았을 때 휘는 거리와 세기  // 꽃 아래로 이 길이만큼은 잎을 두지 않음
   BUD_SIZE: 1.6, FLOWER_SIZE: 1.9,   // 꽃봉오리 / 활짝 핀 꽃 크기 배율    // 입 최대로 벌렸을 때 초당 개화량 (0→1)
   TILT_GAIN: 0.6,       // 고개 각도 → 실시간 휨 배율 (고개 세우면 풀림)
   TILT_STEER: 2.6,        // 웃으며 자랄 때 고개 방향으로 줄기가 틀어지는 힘 (흔적으로 남음)
@@ -423,37 +426,97 @@ function ensureLeafCap(n) {
   if (leafMesh) { scene.remove(leafMesh); leafMesh.dispose(); }
   leafMesh = m; leafCap = cap; scene.add(m);
 }
+// 꽃 근처에는 잎이 나지 않게 비워 두는 길이 (꽃잎과 겹쳐 뚫리는 것 방지)
+function leafClear() { return plant.budAt >= 0 ? CFG.LEAF_FLOWER_CLEAR : 0.2; }
 function addLeaf() {
   const L = plant.length;
-  const s = L < 0.25 ? Math.random() * L : 0.08 + Math.random() * (L - 0.08);
-  plant.leaves.push({ s, ang: Math.random() * Math.PI * 2, size: 0.75 + Math.random() * 0.55, born: clock });
+  const lo = Math.min(0.08, L * 0.3), hi = Math.max(lo, L - leafClear());
+  // 자유분방하게: 후보 3개 중 덜 붐비는 곳 (16개 중 최선을 고르던 전보다 느슨 → 간격이 들쭉날쭉하지만 한쪽에 몰리진 않음)
+  let best = lo + Math.random() * (hi - lo), bestGap = -1;
+  for (let c = 0; c < CFG.LEAF_TRIES; c++) {
+    const cand = lo + Math.random() * (hi - lo);
+    let gap = Infinity;
+    for (const lf of plant.leaves) gap = Math.min(gap, Math.abs(Math.min(lf.s, hi) - cand));
+    if (gap > bestGap) { bestGap = gap; best = cand; }
+  }
+  // 둘레 방향: 가장 가까운 잎과 너무 같은 쪽만 피하고 나머지는 랜덤
+  let near = null, nd = Infinity;
+  for (const lf of plant.leaves) { const d = Math.abs(lf.s - best); if (d < nd) { nd = d; near = lf; } }
+  const ang = near && nd < 0.6 ? near.ang + THREE.MathUtils.degToRad(70 + Math.random() * 220) : Math.random() * Math.PI * 2;
+  plant.leaves.push({
+    s: best, ang,
+    size: 0.6 + Math.random() * 0.65,          // 크기 제각각
+    lift: 0.25 + Math.random() * 0.75,         // 위로 솟은 정도 제각각 (작을수록 옆으로 뻗음)
+    roll: (Math.random() - 0.5) * 1.0,         // 잎면이 비틀린 정도
+    born: clock, def: new THREE.Vector3(),
+  });
   ensureLeafCap(plant.leaves.length);
 }
 const M4 = new THREE.Matrix4(), Q = new THREE.Quaternion(), SC = new THREE.Vector3(), POS = new THREE.Vector3();
 const XA = new THREE.Vector3(), YA = new THREE.Vector3(), ZA = new THREE.Vector3(), OUT = new THREE.Vector3();
+/* 닿으면 통과하지 않고 휘어지게: 매 프레임 장애물(줄기 일부, 꽃) 목록을 만들어 잎·꽃잎을 밀어냄 */
+const obs = [];   // {x,y,z,r,s}
+function buildObstacles(n) {
+  obs.length = 0;
+  const stride = Math.max(1, Math.floor(n / 260));
+  for (let i = 0; i < n; i += stride) obs.push({ x: disp[i * 3], y: disp[i * 3 + 1], z: disp[i * 3 + 2], r: 0.07, s: plant.s[i], kind: 0 });
+}
+const OQ = new THREE.Vector3(), PUSH = new THREE.Vector3(), TIPP = new THREE.Vector3();
+function pushFrom(q, skipS, out, weight) {
+  for (const o of obs) {
+    if (skipS != null && Math.abs(o.s - skipS) < 0.5) continue;
+    const dx = q.x - o.x, dy = q.y - o.y, dz = q.z - o.z, d2 = dx * dx + dy * dy + dz * dz, rr = o.r + CFG.TOUCH_PAD;
+    if (d2 >= rr * rr) continue;
+    const d = Math.sqrt(d2) || 1e-4, k = (rr - d) / rr * weight;
+    out.x += dx / d * k; out.y += dy / d * k; out.z += dz / d * k;
+  }
+}
+const leafTips = [];   // 꽃잎 충돌용
 function updateLeaves(n) {
   if (!leafMesh) return;
   const count = plant.leaves.length;
+  // 꽃도 장애물로 (봉오리/개화 크기에 맞춰)
+  let flowerObs = null;
+  if (plant.budAt >= 0) {
+    const e = plant.bloom * plant.bloom * (3 - 2 * plant.bloom);
+    const sc = THREE.MathUtils.lerp(CFG.BUD_SIZE, CFG.FLOWER_SIZE, e);
+    flowerObs = { x: disp[(n - 1) * 3], y: disp[(n - 1) * 3 + 1], z: disp[(n - 1) * 3 + 2], r: (0.12 + 0.36 * e) * sc, s: -99 };
+    obs.push(flowerObs);
+  }
+  leafTips.length = 0;
   for (let k = 0; k < count; k++) {
     const lf = plant.leaves[k];
-    const i = Math.min(indexAtS(lf.s), n - 1);
+    if (!lf.def) lf.def = new THREE.Vector3();
+    const lift = lf.lift ?? 0.6, roll = lf.roll ?? 0;
+    // 꽃봉오리가 생기기 전에 끝 가까이 난 잎은, 꽃 자리에서 비켜나도록 살짝 아래에 표시
+    const i = Math.min(indexAtS(Math.min(lf.s, Math.max(0, plant.length - leafClear()))), n - 1);
     dispTangent(i, n, T);
     N.set(0, 0, 1).addScaledVector(T, -T.z); if (N.lengthSq() < 1e-4) N.set(1, 0, 0).addScaledVector(T, -T.x); N.normalize();
     B.crossVectors(T, N);
     OUT.copy(N).multiplyScalar(Math.cos(lf.ang)).addScaledVector(B, Math.sin(lf.ang)).normalize();
-    YA.copy(OUT).multiplyScalar(0.8).addScaledVector(T, 0.6).normalize();   // 잎이 뻗는 방향
-    XA.crossVectors(YA, T).normalize();
-    if (XA.lengthSq() < 1e-4) XA.set(1, 0, 0);
+    YA.copy(OUT).addScaledVector(T, lift).normalize();   // 잎이 뻗는 방향
+    const age = (clock - lf.born) / 0.45;
+    const g = age >= 1 ? 1 : 1 - Math.pow(1 - Math.max(age, 0), 3) + Math.sin(Math.min(age, 1) * Math.PI) * 0.12;
+    const len = 0.56 * lf.size * g;
+    POS.set(disp[i * 3], disp[i * 3 + 1], disp[i * 3 + 2]).addScaledVector(OUT, 0.03);
+    // 닿은 곳에서 밀어내는 방향 계산 (잎 가운데·끝 두 지점)
+    PUSH.set(0, 0, 0);
+    OQ.copy(POS).addScaledVector(YA, len * 0.5); pushFrom(OQ, lf.s, PUSH, 1);
+    OQ.copy(POS).addScaledVector(YA, len);       pushFrom(OQ, lf.s, PUSH, 1.4);
+    PUSH.addScaledVector(YA, -PUSH.dot(YA));     // 길이 방향 성분은 빼고 옆으로만 휘게
+    lf.def.lerp(PUSH, 0.25);                     // 부드럽게 따라감
+    YA.addScaledVector(lf.def, CFG.BEND_AMOUNT).normalize();
+    XA.crossVectors(YA, T); if (XA.lengthSq() < 1e-4) XA.set(1, 0, 0); XA.normalize();
+    XA.applyAxisAngle(YA, roll);
     ZA.crossVectors(XA, YA).normalize();
     M4.makeBasis(XA, YA, ZA);
     Q.setFromRotationMatrix(M4);
-    const age = (clock - lf.born) / 0.45;
-    const g = age >= 1 ? 1 : 1 - Math.pow(1 - Math.max(age, 0), 3) * 1 + Math.sin(Math.min(age, 1) * Math.PI) * 0.12;
     SC.setScalar(lf.size * g);
-    POS.set(disp[i * 3], disp[i * 3 + 1], disp[i * 3 + 2]).addScaledVector(OUT, 0.03);
     M4.compose(POS, Q, SC);
     leafMesh.setMatrixAt(k, M4);
+    leafTips.push(POS.x + YA.x * len * 0.6, POS.y + YA.y * len * 0.6, POS.z + YA.z * len * 0.6);
   }
+  if (flowerObs) obs.pop();
   leafMesh.count = count;
   leafMesh.instanceMatrix.needsUpdate = true;
 }
@@ -510,9 +573,32 @@ function updateFlower(n) {
   const b = plant.bloom, e = b * b * (3 - 2 * b);
   flower.scale.setScalar(easeOutBack(appear) * THREE.MathUtils.lerp(CFG.BUD_SIZE, CFG.FLOWER_SIZE, e));
   petalMat.color.copy(PETAL_BUD).lerp(PETAL_OPEN, Math.min(1, b * 2.2));
+  // 꽃잎 끝 근처에 줄기(꽃 바로 아래는 제외)나 잎이 있으면 그 반대쪽으로 접힘
+  const L = plant.length, reach = 0.45 * flower.scale.x;
   for (const p of petals) {
     // 닫힘: 위로 모임(약 8°) → 열림: 옆으로 펼쳐지고 살짝 처짐(약 100°)
-    p.tilt.rotation.x = THREE.MathUtils.lerp(0.14, 1.75 + p.jitter, e);
+    const base = THREE.MathUtils.lerp(0.14, 1.75 + p.jitter, e);
+    const yaw = p.tilt.parent.rotation.y, st = Math.sin(base), ct = Math.cos(base);
+    TIPP.set(Math.sin(yaw) * st, ct, Math.cos(yaw) * st).applyQuaternion(flower.quaternion).multiplyScalar(reach * p.len).add(flower.position);
+    let fold = 0;
+    const r0 = 0.07 + CFG.TOUCH_PAD;
+    for (const o of obs) {
+      if (o.s > L - 0.7) continue;
+      const dx = TIPP.x - o.x, dy = TIPP.y - o.y, dz = TIPP.z - o.z, d = Math.hypot(dx, dy, dz);
+      if (d < r0 + 0.12) {
+        const above = (o.x - flower.position.x) * T.x + (o.y - flower.position.y) * T.y + (o.z - flower.position.z) * T.z;
+        fold += (above > reach * ct ? 1 : -1) * (1 - d / (r0 + 0.12));
+      }
+    }
+    for (let j = 0; j < leafTips.length; j += 3) {
+      const dx = TIPP.x - leafTips[j], dy = TIPP.y - leafTips[j + 1], dz = TIPP.z - leafTips[j + 2], d = Math.hypot(dx, dy, dz);
+      if (d < 0.3) {
+        const above = (leafTips[j] - flower.position.x) * T.x + (leafTips[j + 1] - flower.position.y) * T.y + (leafTips[j + 2] - flower.position.z) * T.z;
+        fold += (above > reach * ct ? 1 : -1) * (1 - d / 0.3);
+      }
+    }
+    p.fold = THREE.MathUtils.lerp(p.fold || 0, THREE.MathUtils.clamp(fold, -1, 1) * 0.9, 0.2);
+    p.tilt.rotation.x = base + p.fold;
     const sc = THREE.MathUtils.lerp(0.42, 1, e);
     p.m.scale.set(THREE.MathUtils.lerp(1.6, 1, e), sc * p.len, 1);
   }
@@ -736,6 +822,7 @@ function frame(now) {
   const n = computeDisplay(st.bend);
   buildStem(n);
   tipCap.position.set(disp[(n - 1) * 3], disp[(n - 1) * 3 + 1], disp[(n - 1) * 3 + 2]);
+  buildObstacles(n);
   updateLeaves(n);
   updateFlower(n);
   placeCamera(clock);
@@ -756,7 +843,7 @@ function saveDraft() {
     localStorage.setItem(DRAFT_KEY, JSON.stringify({
       t: Date.now(), pts: plant.pts.map(v => +v.toFixed(4)), s: plant.s.map(v => +v.toFixed(4)), length: plant.length,
       heading: plant.heading.toArray(), touchedCeiling: plant.touchedCeiling, goalY: plant.goalY, turnUpAt: plant.turnUpAt,
-      leaves: plant.leaves.map(l => [+l.s.toFixed(3), +l.ang.toFixed(3), +l.size.toFixed(3)]),
+      leaves: plant.leaves.map(l => [+l.s.toFixed(3), +l.ang.toFixed(3), +l.size.toFixed(3), +(l.lift ?? 0.6).toFixed(3), +(l.roll ?? 0).toFixed(3)]),
       bud: plant.budAt >= 0, bloom: plant.bloom, stepNow,
     }));
   } catch (_) {}
@@ -769,7 +856,7 @@ function loadDraft() {
     plant.pts = d.pts; plant.s = d.s; plant.length = d.length;
     plant.heading.fromArray(d.heading).normalize();
     plant.touchedCeiling = !!d.touchedCeiling; plant.goalY = d.goalY === -1 ? -1 : 1; plant.turnUpAt = +d.turnUpAt || 0;
-    plant.leaves = d.leaves.map(([s, ang, size]) => ({ s, ang, size, born: -10 }));
+    plant.leaves = d.leaves.map(([s, ang, size, lift, roll]) => ({ s, ang, size, lift: lift ?? 0.6, roll: roll ?? 0, born: -10, def: new THREE.Vector3() }));
     plant.budAt = d.bud ? -10 : -1; plant.bloom = Math.min(1, Math.max(0, +d.bloom || 0));
     stepNow = d.stepNow || CFG.STEP;
     if (plant.leaves.length) ensureLeafCap(plant.leaves.length);
