@@ -135,10 +135,10 @@ const CFG = {
   BLOOM_SPEED: 0.35,
   LEAF_FLOWER_CLEAR: 1.1,
   LEAF_TRIES: 3,
-  FLOWER_EDGE: 0.55,    // 꽃이 화면 가장자리에서 떨어져 있는 거리
+  FLOWER_EDGE: 0.85,    // 꽃이 화면 가장자리에서 떨어져 있는 거리
   FLOWER_AVOID: 0.9,    // 꽃이 예전 줄기와 이 거리 안으로 들어가지 않게 피함        // 잎 위치 후보 수 (클수록 일정한 간격, 작을수록 자유분방)
   TOUCH_PAD: 0.1, BEND_AMOUNT: 2.2,   // 잎·꽃잎이 닿았을 때 휘는 거리와 세기  // 꽃 아래로 이 길이만큼은 잎을 두지 않음
-  BUD_SIZE: 1.25, FLOWER_SIZE: 1.5,   // 꽃봉오리 / 활짝 핀 꽃 크기 배율    // 입 최대로 벌렸을 때 초당 개화량 (0→1)
+  BUD_SIZE: 1.6, FLOWER_SIZE: 2.2,   // 꽃봉오리 / 활짝 핀 꽃 크기 배율    // 입 최대로 벌렸을 때 초당 개화량 (0→1)
   TILT_GAIN: 0.6,       // 고개 각도 → 실시간 휨 배율 (고개 세우면 풀림)
   TILT_STEER: 2.6,        // 웃으며 자랄 때 고개 방향으로 줄기가 틀어지는 힘 (흔적으로 남음)
   JAW_SMILE_LEAK: 0.55, // 입을 벌리면 미소 값도 같이 오르는 현상 보정 (입 벌림 × 이 값만큼 미소에서 뺌)
@@ -288,7 +288,9 @@ function growStep(ds) {
   }
   if (plant.goalY < 0 && p.y < plant.turnUpAt) plant.goalY = 1;
   // 고개 기울기 → 자라는 방향을 화면 좌우로 틀어서 모양에 흔적을 남김
-  steer.x += -plant.tiltSteer * CFG.TILT_STEER;
+  // '지금 보고 있는 화면'의 오른쪽 방향으로 틀기 (식물을 돌려 놓아도 고개 기울인 쪽으로 감)
+  steer.x += -plant.tiltSteer * CFG.TILT_STEER * Math.cos(viewYaw);
+  steer.z += plant.tiltSteer * CFG.TILT_STEER * Math.sin(viewYaw);
   // 목표 방향으로 회전하되 곡률 제한
   const desired = tmpV.copy(h).addScaledVector(steer, ds).normalize();
   const ang = h.angleTo(desired), maxA = CFG.MAX_TURN * ds;
@@ -328,6 +330,8 @@ function simplifyPath() {
 
 /* ---------- 고개 기울기: 비파괴 휨 (표시용 좌표만 계산) ---------- */
 let disp = new Float32Array(0);
+let viewYaw = 0;                          // 지금 카메라가 돌아간 각도
+const bendAxis = new THREE.Vector3(0, 0, 1); // 실시간 휨의 회전축 (기록 순간에 고정)
 function computeDisplay(bend) {
   const n = plant.s.length;
   if (disp.length < n * 3) disp = new Float32Array(Math.ceil(n * 1.5) * 3);
@@ -338,9 +342,13 @@ function computeDisplay(bend) {
     const phi = bend * f;
     const c = Math.cos(phi), sn = Math.sin(phi);
     const dx = P[i * 3] - P[i * 3 - 3], dy = P[i * 3 + 1] - P[i * 3 - 2], dz = P[i * 3 + 2] - P[i * 3 - 1];
-    let x = disp[i * 3 - 3] + dx * c - dy * sn;
-    let y = disp[i * 3 - 2] + dx * sn + dy * c;
-    let z = disp[i * 3 - 1] + dz;
+    // 화면을 바라보는 축(카메라 방향)을 중심으로 회전 → 보는 방향 기준으로 좌우로 휨
+    const ax = bendAxis.x, az = bendAxis.z;
+    const cx = -az * dy, cy = az * dx - ax * dz, cz = ax * dy;          // A × v (A.y = 0)
+    const dot = ax * dx + az * dz;
+    let x = disp[i * 3 - 3] + dx * c + cx * sn + ax * dot * (1 - c);
+    let y = disp[i * 3 - 2] + dy * c + cy * sn;
+    let z = disp[i * 3 - 1] + dz * c + cz * sn + az * dot * (1 - c);
     const q = clampInside({ x, y, z });
     disp[i * 3] = q.x; disp[i * 3 + 1] = q.y; disp[i * 3 + 2] = q.z;
   }
@@ -617,6 +625,8 @@ addEventListener('pointerup', () => { dragX = null; });
 function placeCamera(t) {
   if (dragX == null) { camYawDrag += yawVel * (1 / 60); yawVel *= 0.94; }   // 손을 떼면 관성으로 조금 더 돌다가 멈춤
   const yaw = Math.sin(t * 0.13) * 0.12 + camYawDrag, pitch = PITCH;
+  viewYaw = yaw;
+  if (!frozen) bendAxis.set(Math.sin(yaw), 0, Math.cos(yaw));
   const d = cam.userData.dist;
   cam.position.set(Math.sin(yaw) * Math.cos(pitch) * d, cam.userData.lookY + Math.sin(pitch) * d, Math.cos(yaw) * Math.cos(pitch) * d);
   cam.lookAt(0, cam.userData.lookY, 0);
