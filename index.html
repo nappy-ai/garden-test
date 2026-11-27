@@ -72,7 +72,7 @@ html,body{height:100%;background:var(--cream);color:var(--ink);overflow:hidden;
   <div class="meta" id="meta"></div>
 </div>
 
-<div class="rotHint" id="rotHint">← 화면을 밀어 상자를 돌려 보세요 →</div>
+<div class="rotHint" id="rotHint">← 화면을 밀어 식물을 돌려 보세요 →</div>
 
 <div class="bottom">
   <div class="cam"><video id="video" playsinline muted autoplay></video><span class="dot" id="camDot"></span></div>
@@ -134,9 +134,11 @@ const CFG = {
   BUD_LENGTH: 1.6,      // 이 길이가 되면 꽃봉오리 생김
   BLOOM_SPEED: 0.35,
   LEAF_FLOWER_CLEAR: 1.1,
-  LEAF_TRIES: 3,        // 잎 위치 후보 수 (클수록 일정한 간격, 작을수록 자유분방)
+  LEAF_TRIES: 3,
+  FLOWER_EDGE: 0.55,    // 꽃이 화면 가장자리에서 떨어져 있는 거리
+  FLOWER_AVOID: 0.9,    // 꽃이 예전 줄기와 이 거리 안으로 들어가지 않게 피함        // 잎 위치 후보 수 (클수록 일정한 간격, 작을수록 자유분방)
   TOUCH_PAD: 0.1, BEND_AMOUNT: 2.2,   // 잎·꽃잎이 닿았을 때 휘는 거리와 세기  // 꽃 아래로 이 길이만큼은 잎을 두지 않음
-  BUD_SIZE: 1.6, FLOWER_SIZE: 1.9,   // 꽃봉오리 / 활짝 핀 꽃 크기 배율    // 입 최대로 벌렸을 때 초당 개화량 (0→1)
+  BUD_SIZE: 1.25, FLOWER_SIZE: 1.5,   // 꽃봉오리 / 활짝 핀 꽃 크기 배율    // 입 최대로 벌렸을 때 초당 개화량 (0→1)
   TILT_GAIN: 0.6,       // 고개 각도 → 실시간 휨 배율 (고개 세우면 풀림)
   TILT_STEER: 2.6,        // 웃으며 자랄 때 고개 방향으로 줄기가 틀어지는 힘 (흔적으로 남음)
   JAW_SMILE_LEAK: 0.55, // 입을 벌리면 미소 값도 같이 오르는 현상 보정 (입 벌림 × 이 값만큼 미소에서 뺌)
@@ -168,9 +170,10 @@ renderer.toneMappingExposure = 1.05;
 const scene = new THREE.Scene();
 const CREAM = new THREE.Color('#F4F1E8');
 scene.background = CREAM;
-scene.fog = new THREE.Fog(CREAM, 14, 30);
 
-const cam = new THREE.PerspectiveCamera(32, 1, 0.1, 100);
+// 원근 없는 카메라: 화면 가장자리가 곧 벽이 되도록 (깊이와 상관없이 같은 크기로 보임)
+const cam = new THREE.OrthographicCamera(-1, 1, 1, -1, 0.1, 100);
+const PITCH = 0.12;   // 살짝 내려다보는 각도
 
 scene.add(new THREE.HemisphereLight('#fffaf0', '#c9c3a8', 1.25));
 const sun = new THREE.DirectionalLight('#fff4df', 2.1);
@@ -179,31 +182,35 @@ sun.castShadow = true;
 sun.shadow.mapSize.set(1024, 1024);
 sun.shadow.bias = -0.0008;
 sun.shadow.radius = 4;
+Object.assign(sun.shadow.camera, { left: -9, right: 9, top: 9, bottom: -9, near: 0.5, far: 40 });
 scene.add(sun, sun.target);
 const fill = new THREE.DirectionalLight('#e8ecff', 0.5);
 fill.position.set(4, 3, -2);
 scene.add(fill);
 
-// 상자 크기는 화면 비율에 맞춰 시작 시 한 번 정해요
+/* 보이지 않는 성장 공간 = 휴대폰 화면
+   - 천장 = 화면 위쪽(제목 아래), 바닥 = 아래 버튼 영역 위
+   - 좌우 벽 = 화면 양옆. 360도 돌려도 똑같이 맞도록 공간을 원기둥으로 잡음 (지름 = 화면 너비) */
+const SCREEN = { top: 0.11, bottom: 0.80 };   // 화면 높이 대비: 식물 영역 위·아래 경계
 const size0 = { w: innerWidth, h: innerHeight };
-const usableH = size0.h * 0.80;
-const BOX = { H: CFG.BOX_H, D: CFG.BOX_D, W: THREE.MathUtils.clamp(CFG.BOX_H * (size0.w / usableH) * 0.92, 2.8, 7.5) };
-const LIM = { x: BOX.W / 2 - CFG.WALL_PAD, yMin: 0.12, yMax: BOX.H - CFG.WALL_PAD, z: BOX.D / 2 - CFG.WALL_PAD };
+const BOX = { H: CFG.BOX_H };
+{
+  const asp = size0.w / size0.h, frac = SCREEN.bottom - SCREEN.top;
+  const vh = BOX.H * Math.cos(PITCH) / (frac - 0.94 * asp * Math.sin(PITCH));
+  BOX.R = 0.47 * vh * asp;
+}
+BOX.W = BOX.D = BOX.R * 2;
+const LIM = { r: BOX.R - CFG.WALL_PAD, yMin: 0.12, yMax: BOX.H - CFG.WALL_PAD };
+function clampInside(v) {   // v: {x,y,z} — 원기둥 안으로
+  const r = Math.hypot(v.x, v.z);
+  if (r > LIM.r) { v.x *= LIM.r / r; v.z *= LIM.r / r; }
+  v.y = THREE.MathUtils.clamp(v.y, LIM.yMin, LIM.yMax);
+  return v;
+}
 
-// 바닥
-const floor = new THREE.Mesh(new THREE.CircleGeometry(22, 48), new THREE.MeshStandardMaterial({ color: '#efe9da', roughness: 1 }));
-floor.rotation.x = -Math.PI / 2; floor.position.y = -0.13; floor.receiveShadow = true; scene.add(floor);
-
-// 투명 상자
-const boxGeo = new THREE.BoxGeometry(BOX.W, BOX.H, BOX.D);
-boxGeo.translate(0, BOX.H / 2 + 0.004, 0);
-const glass = new THREE.Mesh(boxGeo, new THREE.MeshBasicMaterial({ color: '#ffffff', transparent: true, opacity: 0.10, side: THREE.BackSide, depthWrite: false }));
-scene.add(glass);
-const edges = new THREE.LineSegments(new THREE.EdgesGeometry(boxGeo), new THREE.LineBasicMaterial({ color: '#40543A', transparent: true, opacity: 0.32 }));
-scene.add(edges);
-// 상자 받침
-const plinth = new THREE.Mesh(new THREE.BoxGeometry(BOX.W + 0.24, 0.12, BOX.D + 0.24), new THREE.MeshStandardMaterial({ color: '#e4dcc6', roughness: 0.9 }));
-plinth.position.y = -0.066; plinth.receiveShadow = true; scene.add(plinth);
+// 바닥: 색 없이 그림자만 받음 → 화면 배경과 이어져 보임
+const floor = new THREE.Mesh(new THREE.PlaneGeometry(40, 40), new THREE.ShadowMaterial({ opacity: 0.13 }));
+floor.rotation.x = -Math.PI / 2; floor.receiveShadow = true; scene.add(floor);
 
 // 흙 둔덕 + 씨앗
 const soil = new THREE.Mesh(new THREE.SphereGeometry(0.55, 32, 16, 0, Math.PI * 2, 0, Math.PI / 2), new THREE.MeshStandardMaterial({ color: '#8a6a4a', roughness: 1 }));
@@ -240,12 +247,9 @@ pushPoint(0, 0.12, 0); pushPoint(0, 0.18, 0); pushPoint(0.005, 0.24, 0); pushPoi
 
 const tmpV = new THREE.Vector3(), tmpA = new THREE.Vector3(), tmpB = new THREE.Vector3();
 const walls = [
-  { n: new THREE.Vector3(1, 0, 0),  d: p => p.x + LIM.x },
-  { n: new THREE.Vector3(-1, 0, 0), d: p => LIM.x - p.x },
+  { radial: true, n: new THREE.Vector3(), d: p => LIM.r - Math.hypot(p.x, p.z) },
   { n: new THREE.Vector3(0, 1, 0),  d: p => p.y - LIM.yMin, floor: true },
   { n: new THREE.Vector3(0, -1, 0), d: p => LIM.yMax - p.y, ceiling: true },
-  { n: new THREE.Vector3(0, 0, 1),  d: p => p.z + LIM.z },
-  { n: new THREE.Vector3(0, 0, -1), d: p => LIM.z - p.z },
 ];
 function growStep(ds) {
   const n = plant.s.length, i = (n - 1) * 3;
@@ -253,8 +257,10 @@ function growStep(ds) {
   const h = plant.heading;
   const steer = new THREE.Vector3();
   for (const w of walls) {
-    const d = w.d(p);
+    // 꽃이 달린 뒤에는 꽃잎이 화면 밖으로 나가지 않게, 옆벽·천장을 꽃 크기만큼 더 일찍 피함
+    const d = w.d(p) - (plant.budAt >= 0 && !w.floor ? CFG.FLOWER_EDGE : 0);
     if (d >= CFG.WALL_SENSE) continue;
+    if (w.radial) { const r = Math.hypot(p.x, p.z) || 1; w.n.set(-p.x / r, 0, -p.z / r); }
     const k = Math.pow(1 - Math.max(d, 0) / CFG.WALL_SENSE, 2);
     steer.addScaledVector(w.n, k * CFG.WALL_PUSH);
     // 벽을 따라 미끄러지는 힘 (현재 진행 방향의 벽-평행 성분 유지)
@@ -271,6 +277,15 @@ function growStep(ds) {
   plant.wander.add(tmpB.set(Math.random() - 0.5, Math.random() - 0.5, (Math.random() - 0.5) * 0.6).multiplyScalar(1.2)).multiplyScalar(0.92);
   steer.addScaledVector(plant.wander, CFG.WANDER);
   steer.y += plant.goalY > 0 ? CFG.UP_BIAS : -CFG.DOWN_BIAS;
+  // 꽃봉오리가 생긴 뒤에는 꽃(줄기 끝)이 예전 줄기·잎 속으로 파고들지 않게 피해서 자람
+  if (plant.budAt >= 0) {
+    const R = CFG.FLOWER_AVOID, P = plant.pts, S = plant.s, nn = S.length, lim = plant.length - 1.2;
+    const stride = Math.max(1, Math.floor(nn / 300));
+    for (let j = 0; j < nn && S[j] < lim; j += stride) {
+      const dx = p.x - P[j * 3], dy = p.y - P[j * 3 + 1], dz = p.z - P[j * 3 + 2], d2 = dx * dx + dy * dy + dz * dz;
+      if (d2 < R * R && d2 > 1e-8) { const d = Math.sqrt(d2), k = (1 - d / R) * 14; steer.x += dx / d * k; steer.y += dy / d * k; steer.z += dz / d * k; }
+    }
+  }
   if (plant.goalY < 0 && p.y < plant.turnUpAt) plant.goalY = 1;
   // 고개 기울기 → 자라는 방향을 화면 좌우로 틀어서 모양에 흔적을 남김
   steer.x += -plant.tiltSteer * CFG.TILT_STEER;
@@ -282,9 +297,7 @@ function growStep(ds) {
     if (axis.lengthSq() > 0.5) h.applyAxisAngle(axis, Math.min(ang, maxA)).normalize();
   }
   p.addScaledVector(h, ds);
-  p.x = THREE.MathUtils.clamp(p.x, -LIM.x, LIM.x);
-  p.y = THREE.MathUtils.clamp(p.y, LIM.yMin, LIM.yMax);
-  p.z = THREE.MathUtils.clamp(p.z, -LIM.z, LIM.z);
+  clampInside(p);
   pushPoint(p.x, p.y, p.z);
   if (plant.s.length > CFG.MAX_POINTS) simplifyPath();
 }
@@ -328,9 +341,8 @@ function computeDisplay(bend) {
     let x = disp[i * 3 - 3] + dx * c - dy * sn;
     let y = disp[i * 3 - 2] + dx * sn + dy * c;
     let z = disp[i * 3 - 1] + dz;
-    disp[i * 3] = THREE.MathUtils.clamp(x, -LIM.x, LIM.x);
-    disp[i * 3 + 1] = THREE.MathUtils.clamp(y, LIM.yMin, LIM.yMax);
-    disp[i * 3 + 2] = THREE.MathUtils.clamp(z, -LIM.z, LIM.z);
+    const q = clampInside({ x, y, z });
+    disp[i * 3] = q.x; disp[i * 3 + 1] = q.y; disp[i * 3 + 2] = q.z;
   }
   return n;
 }
@@ -573,32 +585,9 @@ function updateFlower(n) {
   const b = plant.bloom, e = b * b * (3 - 2 * b);
   flower.scale.setScalar(easeOutBack(appear) * THREE.MathUtils.lerp(CFG.BUD_SIZE, CFG.FLOWER_SIZE, e));
   petalMat.color.copy(PETAL_BUD).lerp(PETAL_OPEN, Math.min(1, b * 2.2));
-  // 꽃잎 끝 근처에 줄기(꽃 바로 아래는 제외)나 잎이 있으면 그 반대쪽으로 접힘
-  const L = plant.length, reach = 0.45 * flower.scale.x;
   for (const p of petals) {
     // 닫힘: 위로 모임(약 8°) → 열림: 옆으로 펼쳐지고 살짝 처짐(약 100°)
-    const base = THREE.MathUtils.lerp(0.14, 1.75 + p.jitter, e);
-    const yaw = p.tilt.parent.rotation.y, st = Math.sin(base), ct = Math.cos(base);
-    TIPP.set(Math.sin(yaw) * st, ct, Math.cos(yaw) * st).applyQuaternion(flower.quaternion).multiplyScalar(reach * p.len).add(flower.position);
-    let fold = 0;
-    const r0 = 0.07 + CFG.TOUCH_PAD;
-    for (const o of obs) {
-      if (o.s > L - 0.7) continue;
-      const dx = TIPP.x - o.x, dy = TIPP.y - o.y, dz = TIPP.z - o.z, d = Math.hypot(dx, dy, dz);
-      if (d < r0 + 0.12) {
-        const above = (o.x - flower.position.x) * T.x + (o.y - flower.position.y) * T.y + (o.z - flower.position.z) * T.z;
-        fold += (above > reach * ct ? 1 : -1) * (1 - d / (r0 + 0.12));
-      }
-    }
-    for (let j = 0; j < leafTips.length; j += 3) {
-      const dx = TIPP.x - leafTips[j], dy = TIPP.y - leafTips[j + 1], dz = TIPP.z - leafTips[j + 2], d = Math.hypot(dx, dy, dz);
-      if (d < 0.3) {
-        const above = (leafTips[j] - flower.position.x) * T.x + (leafTips[j + 1] - flower.position.y) * T.y + (leafTips[j + 2] - flower.position.z) * T.z;
-        fold += (above > reach * ct ? 1 : -1) * (1 - d / 0.3);
-      }
-    }
-    p.fold = THREE.MathUtils.lerp(p.fold || 0, THREE.MathUtils.clamp(fold, -1, 1) * 0.9, 0.2);
-    p.tilt.rotation.x = base + p.fold;
+    p.tilt.rotation.x = THREE.MathUtils.lerp(0.14, 1.75 + p.jitter, e);
     const sc = THREE.MathUtils.lerp(0.42, 1, e);
     p.m.scale.set(THREE.MathUtils.lerp(1.6, 1, e), sc * p.len, 1);
   }
@@ -609,14 +598,16 @@ function updateFlower(n) {
 /* ---------- 카메라 프레이밍 ---------- */
 let camYawDrag = 0, dragX = null, yawVel = 0, dragged = false;
 function resize() {
-  const w = innerWidth, h = innerHeight;
+  const w = innerWidth, h = innerHeight, asp = w / h, frac = SCREEN.bottom - SCREEN.top;
   renderer.setSize(w, h, false);
-  cam.aspect = w / h;
-  const vh = h * 0.80;                          // 아래 버튼 영역 제외
-  const fov = THREE.MathUtils.degToRad(cam.fov);
-  const needH = BOX.H * 1.1 * (h / vh), needW = BOX.W * 1.12 / cam.aspect;
-  cam.userData.dist = Math.max(needH, needW) / 2 / Math.tan(fov / 2) + BOX.D / 2;
-  cam.userData.lookY = BOX.H / 2 - (BOX.H * 1.1 * (h / vh) - BOX.H * 1.1) / 2 * 0.95;
+  // 식물 공간(원기둥)이 화면 영역에 꽉 차도록 보이는 범위를 계산
+  const needH = (BOX.H * Math.cos(PITCH) + BOX.W * Math.sin(PITCH)) / frac;
+  const needW = BOX.W / 0.94 / asp;
+  const vh = Math.max(needH, needW), vw = vh * asp;
+  const shift = (0.5 - (SCREEN.top + SCREEN.bottom) / 2) * vh;   // 영역 가운데를 화면 가운데보다 살짝 위로
+  cam.left = -vw / 2; cam.right = vw / 2; cam.top = vh / 2 - shift; cam.bottom = -vh / 2 - shift;
+  cam.userData.dist = 30;
+  cam.userData.lookY = BOX.H / 2;
   cam.updateProjectionMatrix();
 }
 addEventListener('resize', resize); resize();
@@ -625,7 +616,7 @@ addEventListener('pointermove', e => { if (dragX != null) { const d = (e.clientX
 addEventListener('pointerup', () => { dragX = null; });
 function placeCamera(t) {
   if (dragX == null) { camYawDrag += yawVel * (1 / 60); yawVel *= 0.94; }   // 손을 떼면 관성으로 조금 더 돌다가 멈춤
-  const yaw = Math.sin(t * 0.13) * 0.12 + camYawDrag, pitch = 0.13;
+  const yaw = Math.sin(t * 0.13) * 0.12 + camYawDrag, pitch = PITCH;
   const d = cam.userData.dist;
   cam.position.set(Math.sin(yaw) * Math.cos(pitch) * d, cam.userData.lookY + Math.sin(pitch) * d, Math.cos(yaw) * Math.cos(pitch) * d);
   cam.lookAt(0, cam.userData.lookY, 0);
