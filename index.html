@@ -160,11 +160,13 @@ import * as THREE from 'three';
    ============================================================ */
 const CFG = {
   // 인식 임계값 (켜짐 / 꺼짐 — 히스테리시스)
-  SMILE_ON: 0.20, SMILE_OFF: 0.10,   // 자연스러운 미소 기준 (실기기 1차 조정)
+  SMILE_ON: 0.15, SMILE_OFF: 0.08,   // 자연스러운 미소 기준 (실기기 1차 조정)
   SMILE_FULL: 0.50,                   // 이 값 이상이면 최대 속도로 성장
   JAW_ON: 0.30,   JAW_OFF: 0.18,
-  PUCKER_ON: 0.45, PUCKER_OFF: 0.28,  // 입술 오므리기(휘파람) → 꽃이 나를 쳐다봄
-  LOOK_TAU: 0.3,                      // 쳐다보는/돌아가는 속도 (초)
+  PUCKER_ON: 0.45, PUCKER_OFF: 0.20,
+  LOOK_HOLD_MS: 1500,
+  LOOK_DELAY_MS: 500,                 // 휘파람을 이만큼 불어야 쳐다보기 시작                 // 휘파람을 멈춘 뒤에도 이만큼은 계속 쳐다봄  // 입술 오므리기(휘파람) → 꽃이 나를 쳐다봄
+  LOOK_TAU: 0.3, LOOK_BACK_TAU: 0.9,  // 쳐다보는 속도 / 원래대로 돌아가는 속도 (천천히)                      // 쳐다보는/돌아가는 속도 (초)
   BLINK_CLOSED: 0.55, BLINK_OPEN: 0.30,
   BLINK_MIN_MS: 40, BLINK_MAX_MS: 1000,   // 이보다 길게 감으면(웃을 때 눈 찡그림 등) 깜빡임으로 안 셈
   ROLL_DEADZONE_DEG: 6, ROLL_MAX_DEG: 30,
@@ -177,13 +179,14 @@ const CFG = {
   LEAF_FLOWER_CLEAR: 1.1,
   LEAF_TRIES: 3,
   PRINT_STEPS: 7, PRINT_STEP_MS: 230, PRINT_PAUSE_MS: 130, PRINT_VOLUME: 0.07, PRINT_DROP_PX: 36,   // 사진 출력 연출 (칸 수·속도·소리 크기)
-  FLOWER_EDGE: 0.85,    // 꽃이 화면 가장자리에서 떨어져 있는 거리
+  FLOWER_EDGE: 0.85,
+  CEIL_PAD: 0.05, CEIL_SENSE: 0.35, FLOWER_CEIL: 0.25,   // 천장: 붙는 거리 / 알아채는 거리 / 꽃이 있을 때 여유    // 꽃이 화면 가장자리에서 떨어져 있는 거리
   FLOWER_AVOID: 0.9,    // 꽃이 예전 줄기와 이 거리 안으로 들어가지 않게 피함        // 잎 위치 후보 수 (클수록 일정한 간격, 작을수록 자유분방)
   TOUCH_PAD: 0.1, BEND_AMOUNT: 2.2,   // 잎·꽃잎이 닿았을 때 휘는 거리와 세기  // 꽃 아래로 이 길이만큼은 잎을 두지 않음
   BUD_SIZE: 1.6, FLOWER_SIZE: 2.2,   // 꽃봉오리 / 활짝 핀 꽃 크기 배율    // 입 최대로 벌렸을 때 초당 개화량 (0→1)
   TILT_GAIN: 0.6,       // 고개 각도 → 실시간 휨 배율 (고개 세우면 풀림)
   TILT_STEER: 2.6,        // 웃으며 자랄 때 고개 방향으로 줄기가 틀어지는 힘 (흔적으로 남음)
-  JAW_SMILE_LEAK: 0.55, // 입을 벌리면 미소 값도 같이 오르는 현상 보정 (입 벌림 × 이 값만큼 미소에서 뺌)
+  JAW_SMILE_LEAK: 0.55, JAW_LEAK_FROM: 0.15, // 입을 벌리면 미소 값도 같이 오르는 현상 보정 (입 벌림 × 이 값만큼 미소에서 뺌)
   STEP: 0.05,           // 경로 점 간격
   MAX_POINTS: 3000,     // 넘으면 경로 단순화(점 간격 2배로 재샘플)
   // 투명 상자 안에서의 움직임
@@ -242,7 +245,7 @@ const BOX = { H: CFG.BOX_H };
   BOX.R = 0.47 * vh * asp;
 }
 BOX.W = BOX.D = BOX.R * 2;
-const LIM = { r: BOX.R - CFG.WALL_PAD, yMin: 0.12, yMax: BOX.H - CFG.WALL_PAD };
+const LIM = { r: BOX.R - CFG.WALL_PAD, yMin: 0.12, yMax: BOX.H - CFG.CEIL_PAD };
 function clampInside(v) {   // v: {x,y,z} — 원기둥 안으로
   const r = Math.hypot(v.x, v.z);
   if (r > LIM.r) { v.x *= LIM.r / r; v.z *= LIM.r / r; }
@@ -300,17 +303,19 @@ function growStep(ds) {
   const steer = new THREE.Vector3();
   for (const w of walls) {
     // 꽃이 달린 뒤에는 꽃잎이 화면 밖으로 나가지 않게, 옆벽·천장을 꽃 크기만큼 더 일찍 피함
-    const d = w.d(p) - (plant.budAt >= 0 && !w.floor ? CFG.FLOWER_EDGE : 0);
-    if (d >= CFG.WALL_SENSE) continue;
+    // 꽃이 달린 뒤 옆벽은 꽃 크기만큼 일찍 피함. 천장은 꽃이 화면 위 끝까지 닿도록 거의 붙어서 꺾음
+    const d = w.d(p) - (plant.budAt >= 0 && w.radial ? CFG.FLOWER_EDGE : 0) - (plant.budAt >= 0 && w.ceiling ? CFG.FLOWER_CEIL : 0);
+    const sense = w.ceiling ? CFG.CEIL_SENSE : CFG.WALL_SENSE;
+    if (d >= sense) continue;
     if (w.radial) { const r = Math.hypot(p.x, p.z) || 1; w.n.set(-p.x / r, 0, -p.z / r); }
-    const k = Math.pow(1 - Math.max(d, 0) / CFG.WALL_SENSE, 2);
+    const k = Math.pow(1 - Math.max(d, 0) / sense, 2) * (w.ceiling ? 1.8 : 1);   // 천장은 늦게 알아채는 대신 확실히 꺾음
     steer.addScaledVector(w.n, k * CFG.WALL_PUSH);
     // 벽을 따라 미끄러지는 힘 (현재 진행 방향의 벽-평행 성분 유지)
     tmpA.copy(h).addScaledVector(w.n, -h.dot(w.n));
     if (tmpA.lengthSq() < 0.01) tmpA.set(Math.random() < 0.5 ? 1 : -1, 0, 0).addScaledVector(w.n, -tmpA.dot(w.n));
     // 천장·바닥에서는 미끄러지지 않고 반대 방향으로 돌아서도록 옆 힘을 약하게
     steer.addScaledVector(tmpA.normalize(), k * CFG.WALL_SLIDE * (w.ceiling || w.floor ? 0.25 : 1));
-    if (w.ceiling && d < 0.35 && plant.goalY > 0) {
+    if (w.ceiling && d < 0.12 && plant.goalY > 0) {
       plant.touchedCeiling = true; plant.goalY = -1;
       plant.turnUpAt = p.y - BOX.H * THREE.MathUtils.lerp(CFG.DROP_MIN, CFG.DROP_MAX, Math.random());
     }
@@ -771,7 +776,8 @@ function simInput() {
 function applyFace(dt, nowMs) {
   if (!face.present) return false;
   // 입을 크게 벌리면 입꼬리도 올라가 미소로 잘못 잡히므로, 입 벌림만큼 빼서 순수한 미소만 남김
-  const pureSmile = Math.max(0, face.rawSmile - face.rawJaw * CFG.JAW_SMILE_LEAK);
+  // 웃을 때도 입이 조금은 벌어지므로, 0.15 넘게 벌린 만큼만 뺌 (작은 미소가 지워지지 않게)
+  const pureSmile = Math.max(0, face.rawSmile - Math.max(0, face.rawJaw - CFG.JAW_LEAK_FROM) * CFG.JAW_SMILE_LEAK);
   face.smile = ema(face.smile, pureSmile, dt, CFG.TAU_FACE);
   face.jaw = ema(face.jaw, face.rawJaw, dt, CFG.TAU_FACE);
   face.blink = (face.rawBlinkL + face.rawBlinkR) / 2;
@@ -991,9 +997,9 @@ function updateGuide() {
   let key, text;
   if (!face.present) { key = 'noface'; text = '얼굴이 보이지 않아요. 화면을 정면으로 봐 주세요.'; }
   else if (plant.budAt < 0) { key = 'grow'; text = '웃으면 줄기가 자라요. 고개를 기울이거나 눈을 깜빡여 보세요.'; }
-  else if (plant.bloom < 0.02 && st.puckerOn) { key = 'lookbud'; text = '꽃봉오리가 나를 바라보고 있어요.'; }
+  else if (plant.bloom < 0.02 && st.look > 0.5) { key = 'lookbud'; text = '꽃봉오리가 나를 바라보고 있어요.'; }
   else if (plant.bloom < 0.02) { key = 'bud'; text = '꽃봉오리가 생겼어요! 입을 벌리면 꽃이 피어요.'; }
-  else if (st.puckerOn) { key = 'look'; text = '꽃이 나를 바라보고 있어요.'; }
+  else if (st.look > 0.5) { key = 'look'; text = '꽃이 나를 바라보고 있어요.'; }
   else { key = 'free'; text = '웃으면 계속 자라요. 휘파람을 불면 꽃이 나를 봐요.'; }
   if (key !== guideKey) { guideKey = key; $('guide').textContent = text; }
 }
@@ -1027,7 +1033,13 @@ function frame(now) {
     if (!SIM && face.present && now - face.lastSeen > 400) face.present = false;
     applyFace(dt, now);          // 얼굴이 없으면 성장 일시정지
     st.bend = ema(st.bend, targetBend(), dt, 0.35);
-    st.look = ema(st.look, face.present && st.puckerOn ? 1 : 0, dt, CFG.LOOK_TAU);   // 고개를 바로 세우면 0으로 돌아옴
+    // 휘파람을 0.5초쯤 불고 나서야 '어? 누가 부르네' 하고 쳐다봄
+    if (st.puckerOn) {
+      if (!st.puckerSince) st.puckerSince = now;
+      if (now - st.puckerSince >= CFG.LOOK_DELAY_MS) st.lookUntil = now + CFG.LOOK_HOLD_MS;
+    } else st.puckerSince = 0;
+    const looking = now < (st.lookUntil || 0);
+    st.look = ema(st.look, looking ? 1 : 0, dt, looking ? CFG.LOOK_TAU : CFG.LOOK_BACK_TAU);   // 고개를 바로 세우면 0으로 돌아옴
     plant.tiltSteer = st.bend / Math.max(CFG.TILT_GAIN, 1e-3);
   }
   const n = computeDisplay(st.bend);
